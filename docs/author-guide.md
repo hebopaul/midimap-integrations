@@ -246,7 +246,7 @@ Migrated settings appear in the update review and are validated against the
 new schema. Users may manually correct them, including resolving a migration
 collision. Changed endpoint scopes require permission review even if an author
 migrated the settings. The update journal protects configuration changes along
-with the instance version. These declarations do not rewrite mapping arguments,
+with the instance version. Configuration operations alone do not rewrite mapping arguments,
 secrets or sign-in credentials. Secret values can instead be entered in protected
 update fields; changed OAuth/browser-session authority uses a separate disabled
 setup draft, leaving the current instance running until Apply.
