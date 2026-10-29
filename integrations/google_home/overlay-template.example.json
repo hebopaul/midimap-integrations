@@ -1,0 +1,26 @@
+{
+  "id": "feedback_example",
+  "spec": {
+    "v": 1,
+    "toast_id": "feedback_example",
+    "size": "standard",
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Light level",
+          "role": "caption"
+        },
+        {
+          "type": "text",
+          "id": "outcome",
+          "text": {
+            "$bind": "$outcome",
+            "default": "pending"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,1288 @@
+{
+  "format_version": 4,
+  "protocol_version": 1,
+  "id": "org.midimap.google-home",
+  "version": "0.1.8",
+  "name": "Google Home",
+  "author": "MIDImap development team",
+  "description": "Control lights and run automations in a selected Google Home through a host-managed browser session. Development package; Google's private web protocol requires live qualification.",
+  "target": "windows-x64",
+  "entrypoint": "worker/integration-worker.exe",
+  "config_schema_version": 1,
+  "config_schema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "setup": {
+    "web_sessions": [
+      {
+        "id": "google_home",
+        "profile": "google_home_web",
+        "name": "Google Home"
+      }
+    ]
+  },
+  "permissions": [
+    {
+      "id": "google_home.session",
+      "kind": "network.web_session",
+      "description": "Use the connected Google Home account to read and control lights and automations in the selected home.",
+      "scope": {
+        "session": "google_home"
+      },
+      "required_for_initialization": true
+    },
+    {
+      "id": "google_home.menu",
+      "kind": "ui.overlay",
+      "description": "Display Google Home controls in the MIDI menu.",
+      "scope": {
+        "surface": "menu"
+      },
+      "required_for_initialization": false
+    },
+    {
+      "id": "google_home.toast",
+      "kind": "ui.overlay",
+      "description": "Show a brief on-screen confirmation when a Google Home control is used.",
+      "scope": {
+        "surface": "toast"
+      },
+      "required_for_initialization": false
+    }
+  ],
+  "actions": [
+    {
+      "id": "set_power",
+      "name": "Set light power",
+      "description": "Turn the selected light on or off.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Light",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "on": {
+            "type": "boolean",
+            "title": "On"
+          }
+        },
+        "required": [
+          "object_id",
+          "on"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the light power request; the observed light state is reported separately.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "lights"
+    },
+    {
+      "id": "toggle_power",
+      "name": "Toggle light power",
+      "description": "Read the selected light's current on/off state and switch it.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Light",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the light toggle request; the observed light state is reported separately.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "lights"
+    },
+    {
+      "id": "set_brightness",
+      "name": "Set light brightness",
+      "description": "Set brightness from 0 to 100 percent; zero turns the light off.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Light",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "brightness_pct": {
+            "type": "integer",
+            "title": "Brightness (%)",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "object_id",
+          "brightness_pct"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the brightness request; the observed light state is reported separately.",
+      "dispatch": {
+        "mode": "latest",
+        "key_arguments": [
+          "object_id"
+        ],
+        "min_interval_ms": 500
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "lights"
+    },
+    {
+      "id": "run_automation",
+      "name": "Run automation",
+      "description": "Run an enabled automation in the selected home.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Automation",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the automation request.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "automations"
+    },
+    {
+      "id": "set_color_temperature",
+      "name": "Set light color temperature",
+      "description": "Set light color temperature.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Light",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kelvin": {
+            "type": "integer",
+            "title": "Temperature (K)",
+            "minimum": 1000,
+            "maximum": 40000
+          }
+        },
+        "required": [
+          "object_id",
+          "kelvin"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the light request; the observed state is reported separately.",
+      "dispatch": {
+        "mode": "latest",
+        "key_arguments": [
+          "object_id"
+        ],
+        "min_interval_ms": 500
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "lights"
+    },
+    {
+      "id": "set_color",
+      "name": "Set light color",
+      "description": "Set light color.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Light",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "hue_degrees": {
+            "type": "number",
+            "title": "Hue",
+            "minimum": 0,
+            "maximum": 360
+          },
+          "saturation_pct": {
+            "type": "number",
+            "title": "Saturation (%)",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "value_pct": {
+            "type": "number",
+            "title": "Value (%)",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "object_id",
+          "hue_degrees",
+          "saturation_pct",
+          "value_pct"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the light request; the observed state is reported separately.",
+      "dispatch": {
+        "mode": "latest",
+        "key_arguments": [
+          "object_id"
+        ],
+        "min_interval_ms": 500
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "lights"
+    },
+    {
+      "id": "set_room_power",
+      "name": "Set room lights",
+      "description": "Control the lights in a room.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Room",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "on": {
+            "type": "boolean",
+            "title": "On"
+          }
+        },
+        "required": [
+          "object_id",
+          "on"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the room light requests.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "rooms"
+    },
+    {
+      "id": "toggle_room_power",
+      "name": "Toggle room lights",
+      "description": "Control the lights in a room.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Room",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the room light requests.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "rooms"
+    },
+    {
+      "id": "browse_rooms",
+      "name": "Browse rooms",
+      "description": "Browse rooms.",
+      "permissions": [
+        "google_home.session",
+        "google_home.menu"
+      ],
+      "uses_menu": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "completion": "Opened Google Home menu."
+    },
+    {
+      "id": "browse_room",
+      "name": "Browse a room",
+      "description": "Browse a room.",
+      "permissions": [
+        "google_home.session",
+        "google_home.menu"
+      ],
+      "uses_menu": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Room",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "completion": "Opened Google Home menu.",
+      "target_collection": "rooms"
+    },
+    {
+      "id": "browse_devices",
+      "name": "Browse home devices",
+      "description": "Browse home devices.",
+      "permissions": [
+        "google_home.session",
+        "google_home.menu"
+      ],
+      "uses_menu": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "completion": "Opened Google Home menu."
+    },
+    {
+      "id": "browse_automations",
+      "name": "Browse automations",
+      "description": "Browse automations.",
+      "permissions": [
+        "google_home.session",
+        "google_home.menu"
+      ],
+      "uses_menu": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "completion": "Opened Google Home menu."
+    },
+    {
+      "id": "set_thermostat_temperature",
+      "name": "Set thermostat temperature",
+      "description": "Set thermostat temperature.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Thermostat",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "temperature_c": {
+            "type": "number",
+            "title": "Temperature (C)",
+            "minimum": 5,
+            "maximum": 40
+          }
+        },
+        "required": [
+          "object_id",
+          "temperature_c"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the thermostat request; observed state is reported separately.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "thermostats"
+    },
+    {
+      "id": "set_thermostat_mode",
+      "name": "Set thermostat mode",
+      "description": "Set thermostat mode.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Thermostat",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        },
+        "required": [
+          "object_id",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the thermostat request; observed state is reported separately.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "thermostats"
+    },
+    {
+      "id": "set_room_brightness",
+      "name": "Set room brightness",
+      "description": "Set the brightness of all lights in a room.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Room",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "brightness_pct": {
+            "type": "integer",
+            "title": "Brightness (%)",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "object_id",
+          "brightness_pct"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the room brightness requests.",
+      "dispatch": {
+        "mode": "latest",
+        "key_arguments": [
+          "object_id"
+        ],
+        "min_interval_ms": 500
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "rooms"
+    },
+    {
+      "id": "set_thermostat_power",
+      "name": "Set AC / thermostat power",
+      "description": "Turn an AC or thermostat on or off using its separate power control.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "AC / thermostat",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "on": {
+            "type": "boolean",
+            "title": "On"
+          }
+        },
+        "required": [
+          "object_id",
+          "on"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the power request; observed state is reported separately.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "thermostats"
+    },
+    {
+      "id": "toggle_thermostat",
+      "name": "Toggle AC / thermostat power",
+      "description": "Toggle separate power when supported, otherwise switch between off and an available mode.",
+      "permissions": [
+        "google_home.session",
+        "google_home.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Thermostat",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "Google accepted the thermostat request; observed state is reported separately.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "thermostats"
+    }
+  ],
+  "collections": [
+    {
+      "id": "lights",
+      "name": "Lights",
+      "state_ttl_seconds": 10,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "on": {
+            "type": "boolean"
+          },
+          "brightness_pct": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "color_temperature_k": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 40000
+          },
+          "hue_degrees": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 360
+          },
+          "saturation_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "color_value_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "automations",
+      "name": "Automations",
+      "state_ttl_seconds": 60,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "rooms",
+      "name": "Rooms",
+      "state_ttl_seconds": 10,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "thermostats",
+      "name": "Thermostats",
+      "state_ttl_seconds": 10,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "temperature_unit": {
+            "type": "string",
+            "enum": [
+              "C",
+              "F"
+            ]
+          },
+          "target_temperature_c": {
+            "type": "number"
+          },
+          "ambient_temperature_c": {
+            "type": "number"
+          },
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ],
+  "events": [],
+  "reconnect": {
+    "enabled": true
+  },
+  "ui": {
+    "spec_version": 1,
+    "templates": [
+      {
+        "id": "device",
+        "spec": {
+          "v": 1,
+          "toast_id": "google_home",
+          "size": "standard",
+          "root": {
+            "type": "column",
+            "gap": 6,
+            "children": [
+              {
+                "type": "text",
+                "id": "target",
+                "role": "title",
+                "max_lines": 1,
+                "text": {
+                  "$bind": "$target.label",
+                  "default": "Google Home"
+                }
+              },
+              {
+                "type": "text",
+                "id": "action",
+                "role": "caption",
+                "tone": "muted",
+                "text": {
+                  "$bind": "$action.name",
+                  "default": ""
+                }
+              },
+              {
+                "type": "row",
+                "gap": 6,
+                "children": [
+                  {
+                    "type": "status",
+                    "id": "status_indicator",
+                    "tone": {
+                      "$bind": "$feedback.tone",
+                      "default": "muted"
+                    },
+                    "pulse": {
+                      "$bind": "$feedback.pending",
+                      "default": false
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "id": "status_text",
+                    "role": "caption",
+                    "tone": {
+                      "$bind": "$feedback.tone",
+                      "default": "muted"
+                    },
+                    "text": {
+                      "$bind": "$feedback.status",
+                      "default": ""
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "bar",
+                "id": "request_progress",
+                "min": 0,
+                "max": 1,
+                "tone": {
+                  "$bind": "$feedback.tone",
+                  "default": "muted"
+                },
+                "value": {
+                  "$bind": "$feedback.progress",
+                  "default": 0
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "menus": [
+      {
+        "id": "rooms",
+        "title": "Rooms",
+        "dynamic": true,
+        "spec": {
+          "v": 1,
+          "surface": "menu",
+          "size": "standard",
+          "root": {
+            "type": "page",
+            "id": "root",
+            "title": "Rooms",
+            "lazy": true,
+            "items": []
+          }
+        }
+      },
+      {
+        "id": "room_devices",
+        "title": "Room devices",
+        "dynamic": true,
+        "spec": {
+          "v": 1,
+          "surface": "menu",
+          "size": "standard",
+          "root": {
+            "type": "page",
+            "id": "root",
+            "title": "Room devices",
+            "lazy": true,
+            "items": []
+          }
+        }
+      },
+      {
+        "id": "devices",
+        "title": "Home devices",
+        "dynamic": true,
+        "spec": {
+          "v": 1,
+          "surface": "menu",
+          "size": "standard",
+          "root": {
+            "type": "page",
+            "id": "root",
+            "title": "Home devices",
+            "lazy": true,
+            "items": []
+          }
+        }
+      },
+      {
+        "id": "automations",
+        "title": "Automations",
+        "dynamic": true,
+        "spec": {
+          "v": 1,
+          "surface": "menu",
+          "size": "standard",
+          "root": {
+            "type": "page",
+            "id": "root",
+            "title": "Automations",
+            "lazy": true,
+            "items": []
+          }
+        }
+      }
+    ],
+    "icons": [
+      {
+        "id": "brand",
+        "path": "icons/brand.png"
+      }
+    ]
+  },
+  "compatibility": {
+    "min_midimap_version": "0.8.0",
+    "min_midimap_build": "20261029002",
+    "capabilities": [
+      "network.web_session",
+      "ui.overlay"
+    ]
+  },
+  "card": {
+    "icon": "brand",
+    "accent": "#64C5A8",
+    "angle": 135,
+    "gradient": [
+      {
+        "position": 0,
+        "color": "#164238"
+      },
+      {
+        "position": 0.45,
+        "color": "#336BA3"
+      },
+      {
+        "position": 1,
+        "color": "#7754AB"
+      }
+    ]
+  }
+}

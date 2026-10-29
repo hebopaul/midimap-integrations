@@ -1,0 +1,241 @@
+{
+  "format_version": 4,
+  "protocol_version": 1,
+  "id": "org.midimap.obs",
+  "version": "0.1.1",
+  "name": "OBS Studio",
+  "author": "MIDImap development team",
+  "description": "Switch OBS scenes and set audio mute through MIDImap's managed connection. Initial qualification target: OBS 32.0.2 / obs-websocket 5.6.3, RPC 1. Development reference package.",
+  "target": "windows-x64",
+  "entrypoint": "worker/integration-worker.exe",
+  "config_schema_version": 1,
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "host": {
+        "type": "string",
+        "title": "OBS computer",
+        "description": "The name or address of the computer running OBS. Use 127.0.0.1 for this computer.",
+        "minLength": 1,
+        "maxLength": 253
+      },
+      "port": {
+        "type": "integer",
+        "title": "Server port",
+        "description": "The port shown in OBS under Tools, WebSocket Server Settings (4455 unless you changed it).",
+        "minimum": 1,
+        "maximum": 65535
+      }
+    },
+    "required": [
+      "host",
+      "port"
+    ],
+    "additionalProperties": false
+  },
+  "connections": [
+    {
+      "id": "obs",
+      "transport": "websocket",
+      "scheme": "ws",
+      "host_config": "host",
+      "port_config": "port",
+      "path": "/",
+      "subprotocols": [
+        "obswebsocket.json"
+      ]
+    }
+  ],
+  "setup": {
+    "secrets": [
+      {
+        "id": "server_password",
+        "name": "Server password",
+        "description": "The password shown in OBS under Tools, WebSocket Server Settings. Not needed if authentication is turned off there.",
+        "required": false
+      }
+    ]
+  },
+  "permissions": [
+    {
+      "id": "obs.connect",
+      "kind": "network.websocket",
+      "description": "Connect to the OBS WebSocket server selected in setup.",
+      "scope": {
+        "connection": "obs"
+      },
+      "required_for_initialization": true
+    },
+    {
+      "id": "obs.password",
+      "kind": "secret.read",
+      "description": "Read the saved server password to sign in to OBS.",
+      "scope": {
+        "field": "server_password"
+      },
+      "required_for_initialization": false
+    }
+  ],
+  "actions": [
+    {
+      "id": "switch_scene",
+      "name": "Switch scene",
+      "description": "Make the chosen scene the program scene in OBS.",
+      "permissions": [
+        "obs.connect"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Scene",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the switch and started its transition to the scene; the transition may still be running. In studio mode the program scene changes, not the preview."
+    },
+    {
+      "id": "set_input_mute",
+      "name": "Set input mute",
+      "description": "Mute or unmute the chosen OBS audio input. This sets the state; it does not toggle it.",
+      "permissions": [
+        "obs.connect"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "title": "Input",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean",
+            "title": "Muted"
+          }
+        },
+        "required": [
+          "object_id",
+          "muted"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "muted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS has set the input's mute state."
+    }
+  ],
+  "collections": [
+    {
+      "id": "scenes",
+      "name": "Scenes",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "program": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "program"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inputs",
+      "name": "Audio inputs",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "muted"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "events": [],
+  "reconnect": {
+    "enabled": true
+  },
+  "compatibility": {
+    "min_midimap_version": "0.8.0",
+    "min_midimap_build": "20261029002",
+    "capabilities": [
+      "network.websocket"
+    ]
+  },
+  "card": {
+    "icon": "brand",
+    "accent": "#AD99F5",
+    "angle": 135,
+    "gradient": [
+      {
+        "position": 0,
+        "color": "#41385F"
+      },
+      {
+        "position": 0.45,
+        "color": "#7565A3"
+      },
+      {
+        "position": 1,
+        "color": "#242130"
+      }
+    ]
+  },
+  "ui": {
+    "spec_version": 1,
+    "icons": [
+      {
+        "id": "brand",
+        "path": "icons/brand.png"
+      }
+    ]
+  }
+}
