@@ -289,8 +289,9 @@ successful digest-matched qualification evidence. The default produces reviewabl
 metadata and a source export under ignored `build/`; `--publish` is explicit and
 uses the separate machine-local publisher credential. Source exports contain the
 integration and MIT SDK only. Public Cloudflare source ZIPs work without GitHub
-authentication; a GitHub contribution repository is deferred until authenticated
-maintainer access is available. See `server/README.md` for deployment and publishing.
+authentication. Browse sources and contribute improvements at
+[midimap-integrations](https://github.com/hebopaul/midimap-integrations).
+See `server/README.md` for deployment and publishing.
 
 ### Secret fields
 
