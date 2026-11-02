@@ -5,11 +5,12 @@ Browse/download reviewed releases from the Integration Store inside MIDImap.
 
 | Integration | Development version | Qualification |
 | --- | --- | --- |
-| [OBS Studio](integrations/obs) | 0.1.1 | Windows 11 AppContainer worker; simulated OBS peer, including password/reconnect |
-| [Google Home](integrations/google_home) | 0.1.8 | Windows 11 AppContainer worker; synthetic signed-RPC peer |
+| [OBS Studio](integrations/obs) | 0.2.3 | Windows 11 AppContainer worker with a simulated OBS peer; provider source against real OBS 32.0.2 on an isolated copy |
+| [Google Home](integrations/google_home) | 0.1.15 | Windows 11 AppContainer worker; synthetic signed-RPC peer; room toggles on the maintainer's own home |
 
-Real-provider/account/Chrome, packaged MIDImap and Windows 10 qualification are
-not established by those checks. Google Home uses a private protocol that can change.
+Going live on a real streaming service, other Google accounts, Chrome sign-in,
+packaged MIDImap and Windows 10 are not established by those checks. Google Home
+uses a private protocol that can change.
 Exact archive digests and coverage notes are in the public catalog:
 https://midimap-updates.hebopavlos.workers.dev/integrations/catalog
 

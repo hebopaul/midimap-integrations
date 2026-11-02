@@ -8,6 +8,7 @@ results still require a separate observed state check.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Sequence
 from typing import Any
@@ -19,6 +20,8 @@ from midimap_integration_sdk import (
 )
 
 import google_protocol as wire
+
+log = logging.getLogger("google_home")
 
 SESSION = "google_home"
 LIGHTS = "lights"
@@ -60,6 +63,11 @@ GOOGLE_BUSY = "Google Home is temporarily limiting requests; try again later."
 CATALOG_CHANGED = "The light list changed during discovery; MIDImap will read it again."
 TOO_MANY = "This Google Home has more lights than this integration supports."
 TOGGLE_STATE_UNKNOWN = "Google Home has not reported an online on/off state for this light."
+ROOM_WRITES_AT_ONCE = 6                # leave room for reads in the host-call slots
+MENU_PAGES_MAX = 32
+DEVICE_TOGGLE = "Toggle it"
+ROOM_OPEN = "Open the room's devices"
+AUTOMATION_TWICE = "Press twice to run it"
 TOGGLE_PENDING = "The previous light command has not appeared in Google Home state yet."
 MISSING_LIGHT = "The selected light is no longer in this Google Home."
 UNSUPPORTED_ACTION = "The selected light does not support this control."
@@ -93,8 +101,7 @@ class GoogleHomeProvider(Provider):
         self._thermostats: dict[str, wire.DeviceEntry] = {}
         self._thermostat_caps: dict[str, tuple[str, ...]] = {}
         self._menu_room: str | None = None
-        self._menu_targets: dict[str, str] = {}
-        self._menu_offset = 0
+        self._menu_options: dict[str, dict] = {}
         self._toast_sequence = 0
         self._automations: dict[str, wire.AutomationEntry] = {}
         self._automation_revision = 0
@@ -133,6 +140,8 @@ class GoogleHomeProvider(Provider):
                 answer = await self._setup.host.web_session_request(SESSION, operation, body)
         except HostCallError:
             raise
+        if answer.status != 200:
+            log.warning("Google answered %s to %s", answer.status, operation)
         if answer.status in (401, 403):
             raise IntegrationError(ErrorCode.NEEDS_SETUP, GOOGLE_AUTH,
                                    outcome_unknown=write)
@@ -287,9 +296,8 @@ class GoogleHomeProvider(Provider):
             return Page(objects[start:end], f"{self._catalog_revision}.{end}" if end < len(objects) else None)
         if collection_id == AUTOMATIONS:
             await self._refresh_automations()
-            # Capability identifies the action/collection, not current enabled
-            # state. An undeclared "disabled" action is an invalid SDK result.
-            # Execution and the automation menu separately enforce enabled.
+            # Capability identifies the action/collection. Every listed
+            # automation is manually runnable; `enabled` is reported state only.
             objects = [ObjectInfo(key, AUTOMATIONS, _label(entry.display_name), None,
                                   ("run_automation",))
                        for key, entry in sorted(self._automations.items(),
@@ -337,8 +345,10 @@ class GoogleHomeProvider(Provider):
         try:
             for offset in range(0, len(thermostat_requests), wire.GET_TRAITS_BATCH_MAX):
                 batch = thermostat_requests[offset:offset + wire.GET_TRAITS_BATCH_MAX]
+                problems: list = []
                 observed = wire.parse_get_traits(await self._call("get_traits", wire.get_traits_request(
-                    [entry.google_device_id for _, entry in batch])))
+                    [entry.google_device_id for _, entry in batch])), problems)
+                self._log_unreadable(problems)
                 for key, entry in batch:
                     current = observed.get(entry.google_device_id)
                     if current is None:
@@ -366,9 +376,9 @@ class GoogleHomeProvider(Provider):
                 continue
             members = self._room_light_ids(key)
             observed = await self.read_states(members)
-            available = bool(members) and len(observed) == len(members) and all(
-                state.available and isinstance(state.values.get("on"), bool) for state in observed)
-            values = {"on": any(state.values["on"] for state in observed)} if available else {}
+            online = [state for state in observed if state.available and isinstance(state.values.get("on"), bool)]
+            available = bool(online)           # one offline bulb doesn't make the room unknown
+            values = {"on": any(state.values["on"] for state in online)} if available else {}
             previous = self._state.get(key)
             revision = (previous.revision if previous is not None and previous.available == available
                         and dict(previous.values) == values else 1 if previous is None else previous.revision + 1)
@@ -381,7 +391,9 @@ class GoogleHomeProvider(Provider):
                 result = await self._call(
                     "get_traits", wire.get_traits_request(
                         [entry.google_device_id for _key, entry in batch]))
-                by_google_id = wire.parse_get_traits(result)
+                problems: list = []
+                by_google_id = wire.parse_get_traits(result, problems)
+                self._log_unreadable(problems)
                 for key, entry in batch:
                     observed = by_google_id.get(entry.google_device_id)
                     if observed is None:
@@ -403,70 +415,86 @@ class GoogleHomeProvider(Provider):
             raise _protocol_error("state", error) from None
         return states
 
+    def _log_unreadable(self, problems: list) -> None:
+        for google_device_id, trait, reason in problems:
+            name = next((entry.display_name for entry in self._devices.values()
+                         if entry.google_device_id == google_device_id), "A device")
+            log.warning("%s: could not read its %s trait (%s)", _label(name), trait,
+                        _PROTOCOL_REASON_CODES.get(reason, reason))
+
     def _room_light_ids(self, room_id: str) -> list[str]:
         room = self._rooms.get(room_id)
         if room is None:
             raise IntegrationError(ErrorCode.TARGET_MISSING, "The selected room is unavailable.")
         return [key for key, entry in self._lights.items() if entry.google_device_id in room.device_ids]
 
+    def _room_controllable(self, room_id: str, action_id: str) -> list[str]:
+        """Room lights that can take this action. One that can't never blocks the rest."""
+        return [key for key in self._room_light_ids(room_id)
+                if action_id in self._capabilities.get(key, ()) and key not in self._unverified_access]
+
     def _room_capabilities(self, room_id: str) -> tuple[str, ...]:
-        members = self._room_light_ids(room_id)
-        if not members:
+        if not self._room_light_ids(room_id):
             return ("browse_room",)
         caps = ["browse_room"]
-        if all("set_power" in self._capabilities.get(key, ()) for key in members):
+        if self._room_controllable(room_id, "set_power"):
             caps.extend(("set_room_power", "toggle_room_power"))
-        if all("set_brightness" in self._capabilities.get(key, ()) for key in members):
+        if self._room_controllable(room_id, "set_brightness"):
             caps.append("set_room_brightness")
         return tuple(caps)
+
+    async def _write_room(self, room_id: str, members: list, action_id: str, traits: list, pending: bool) -> dict:
+        """Send each light its own update. The room succeeds if any light accepted:
+        an offline bulb must not stop the others, as in Google Home's own app."""
+        if not members:
+            raise IntegrationError(ErrorCode.TARGET_MISSING, "This room has no controllable lights.")
+        gate = asyncio.Semaphore(ROOM_WRITES_AT_ONCE)
+
+        async def send(key: str) -> None:
+            async with gate:
+                await self._send_update(self._check_target(key, action_id), traits)
+        results = await asyncio.gather(*(send(key) for key in members), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, Exception):
+                raise result
+        accepted = [key for key, result in zip(members, results) if not isinstance(result, Exception)]
+        for key, result in zip(members, results):
+            if isinstance(result, Exception):
+                log.warning("Room write to %s failed: %s", self._menu_label(key), getattr(result, "message", type(result).__name__))
+        log.info("Room %s: %s, %d of %d lights accepted", self._menu_label(room_id), action_id, len(accepted), len(members))
+        if not accepted:
+            raise results[0]
+        for key in accepted:
+            self._pending_power[key] = pending
+            self._schedule_write_refresh(key)
+        return {"object_id": room_id, "accepted": True}
 
     @action("set_room_power")
     async def set_room_power(self, arguments: dict) -> dict:
         room_id = arguments["object_id"]
-        members = self._room_light_ids(room_id)
-        if not members:
-            raise IntegrationError(ErrorCode.TARGET_MISSING, "This room has no controllable lights.")
-        entries = [self._check_target(key, "set_power") for key in members]
-        traits = wire.power_traits(arguments["on"])
-        response = await self._call("update_traits", wire.update_traits_request(
-            [wire.device_update(entry.device_ref, traits) for entry in entries]), write=True)
-        try:
-            wire.verify_update_acks(response, {entry.google_device_id: traits for entry in entries})
-        except wire.ProtocolError as error:
-            raise _protocol_error("room-write-ack", error, outcome_unknown=True) from None
-        for key in members:
-            self._pending_power[key] = arguments["on"]
-            self._schedule_write_refresh(key)
-        return {"object_id": room_id, "accepted": True}
+        return await self._write_room(room_id, self._room_controllable(room_id, "set_power"), "set_power",
+                                      wire.power_traits(arguments["on"]), arguments["on"])
 
     @action("set_room_brightness")
     async def set_room_brightness(self, arguments: dict) -> dict:
         room_id = arguments["object_id"]
-        members = self._room_light_ids(room_id)
-        if not members:
-            raise IntegrationError(ErrorCode.TARGET_MISSING, "This room has no controllable lights.")
-        entries = [self._check_target(key, "set_brightness") for key in members]
-        traits = wire.set_level_traits(arguments["brightness_pct"])
-        response = await self._call("update_traits", wire.update_traits_request(
-            [wire.device_update(entry.device_ref, traits) for entry in entries]), write=True)
-        try:
-            wire.verify_update_acks(response, {entry.google_device_id: traits for entry in entries})
-        except wire.ProtocolError as error:
-            raise _protocol_error("room-write-ack", error, outcome_unknown=True) from None
-        for key in members:
-            self._pending_power[key] = arguments["brightness_pct"] > 0
-            self._schedule_write_refresh(key)
-        return {"object_id": room_id, "accepted": True}
+        return await self._write_room(room_id, self._room_controllable(room_id, "set_brightness"), "set_brightness",
+                                      wire.set_level_traits(arguments["brightness_pct"]),
+                                      arguments["brightness_pct"] > 0)
 
     @action("toggle_room_power")
     async def toggle_room_power(self, arguments: dict) -> dict:
         room_id = arguments["object_id"]
-        states = await self.read_states([room_id])
-        if not states or not states[0].available or not isinstance(states[0].values.get("on"), bool):
-            raise IntegrationError(ErrorCode.PROVIDER_ERROR, "The room's light state is unavailable.")
-        if any(key in self._pending_power for key in self._room_light_ids(room_id)):
-            raise IntegrationError(ErrorCode.PROVIDER_ERROR, TOGGLE_PENDING)
-        return await self.set_room_power({"object_id": room_id, "on": not states[0].values["on"]})
+        members = self._room_controllable(room_id, "set_power")
+        online = {state.object_id: state.values["on"] for state in await self.read_states(members)
+                  if state.available and isinstance(state.values.get("on"), bool)}
+        log.info("Room %s toggle: %d lights controllable, %d online", self._menu_label(room_id), len(members), len(online))
+        if not online:
+            raise IntegrationError(ErrorCode.PROVIDER_ERROR, "None of this room's lights are online.")
+        # A command Google hasn't reflected yet counts as done, so a quick second
+        # press flips it back. A bulb that never follows can't block the room.
+        lit = any(self._pending_power.get(key, on) for key, on in online.items())
+        return await self._write_room(room_id, list(online), "set_power", wire.power_traits(not lit), not lit)
 
     def _thermostat_target(self, key: str, action_id: str) -> wire.DeviceEntry:
         entry = self._thermostats.get(key)
@@ -556,8 +584,6 @@ class GoogleHomeProvider(Provider):
         entry = self._automations.get(object_id)
         if entry is None:
             raise IntegrationError(ErrorCode.TARGET_MISSING, "The selected automation is unavailable.")
-        if not entry.enabled:
-            raise IntegrationError(ErrorCode.INVALID_ARGUMENT, "The selected automation is disabled.")
         response = await self._call("execute_automation", wire.execute_automation_request(
             entry.structure_id, entry.automation_id, entry.backend), write=True)
         try:
@@ -637,10 +663,17 @@ class GoogleHomeProvider(Provider):
 
     async def _open_browser(self, menu_id: str, arguments: dict) -> dict:
         self._menu_room = arguments.get("object_id")
-        self._menu_offset = 0
         if self._menu_room is not None and self._menu_room not in self._rooms:
             raise IntegrationError(ErrorCode.TARGET_MISSING, "The selected room is unavailable.")
-        if not await self._setup.ui.open_menu(menu_id, permission_id="google_home.menu"):
+        # Only for this opening: the Controls window always gets the default rows.
+        self._menu_options[menu_id] = {key: value for key, value in arguments.items() if key.startswith("confirm_")}
+        try:
+            opened = await self._setup.ui.open_menu(menu_id, permission_id="google_home.menu")
+        except Exception:
+            self._menu_options.pop(menu_id, None)
+            raise
+        if not opened:
+            self._menu_options.pop(menu_id, None)
             raise IntegrationError(ErrorCode.INSTANCE_UNAVAILABLE, "The Google Home menu could not be opened.")
         return {}
 
@@ -660,109 +693,189 @@ class GoogleHomeProvider(Provider):
     async def browse_automations(self, arguments: dict) -> dict:
         return await self._open_browser("automations", arguments)
 
+    def _menu_key(self, suffix: str) -> str | None:
+        """The object an item or page ID names. Derived, not remembered, so the
+        overlay and the Controls window can't disturb each other."""
+        for store in (self._rooms, self._lights, self._thermostats, self._automations):
+            for key in store:
+                if key.split(":")[-1][:24] == suffix:
+                    return key
+        return None
+
+    def _device_entries(self, allowed: set | None) -> list:
+        entries = []
+        for entry in self._devices.values():
+            if allowed is not None and entry.google_device_id not in allowed:
+                continue
+            light_id = wire.object_id(self._structure_id, entry.google_device_id)
+            thermostat_id = wire.stable_id("thermostat", self._structure_id, entry.google_device_id)
+            key = thermostat_id if thermostat_id in self._thermostats else light_id
+            entries.append((key, entry.display_name,
+                            bool(self._thermostat_caps.get(key)) if key in self._thermostats else
+                            "toggle_power" in self._capabilities.get(key, ())))
+        return sorted(entries, key=lambda item: (item[1].casefold(), item[0]))
+
+    def _can_toggle(self, key: str) -> bool:
+        return "toggle_power" in self._capabilities.get(key, ()) \
+            or "toggle_thermostat" in self._thermostat_caps.get(key, ())
+
+    def _device_row(self, key: str, name: str, supported: bool, toggle_first: bool, pages: list) -> dict:
+        """One device. Confirm toggles it or opens its controls, as the mapping chose."""
+        suffix = key.split(":")[-1][:24]
+        item = {"type": "action_item", "id": "i_" + suffix, "label": _label(name),
+                "icon": "thermostat" if key in self._thermostats else "light", "disabled": not supported}
+        if not supported or (toggle_first and self._can_toggle(key)):
+            return item
+        if len(pages) >= MENU_PAGES_MAX:       # the host limits declared pages: toggle directly
+            item["disabled"] = not self._can_toggle(key)
+            return item
+        item["opens"] = "p_" + suffix
+        pages.append({"type": "page", "id": item["opens"], "title": _label(name), "lazy": True, "items": []})
+        if self._can_toggle(key):
+            item["alternates"] = {"double": {"id": "toggle", "label": "Toggle"}}
+        return item
+
+    def _room_of(self, key: str) -> str | None:
+        device = self._lights.get(key) or self._thermostats.get(key)
+        if device is None:
+            return None
+        return next((room_id for room_id, room in self._rooms.items()
+                     if device.google_device_id in room.device_ids), None)
+
+    def _room_page_items(self, room_id: str, pages: list) -> list:
+        items = []
+        if "toggle_room_power" in self._room_capabilities(room_id):
+            items.append({"type": "action_item", "id": "room_power", "icon": "power", "label": "Toggle room lights"})
+        allowed = set(self._rooms[room_id].device_ids)
+        for key, name, supported in self._device_entries(allowed):
+            items.append(self._device_row(key, name, supported, False, pages))
+        return items
+
+    async def _device_controls(self, target: str) -> list:
+        """Every control the device supports."""
+        states = await self.read_states([target])
+        values = states[0].values if states else {}
+        unavailable = not states or not states[0].available
+        controls = []
+        caps = self._capabilities.get(target, self._thermostat_caps.get(target, ()))
+        # The submenu always lists every control the device supports.
+        if "toggle_power" in caps or "toggle_thermostat" in caps:
+            on = values.get("on")
+            if not isinstance(on, bool) and isinstance(values.get("mode"), str):
+                on = values["mode"] != "off"
+            if isinstance(on, bool):
+                controls.append({"type": "toggle_item", "id": "power", "icon": "power", "label": "Power", "on": on})
+            else:
+                controls.append({"type": "action_item", "id": "power", "icon": "power", "label": "Power unavailable", "disabled": True})
+        if "set_brightness" in caps and isinstance(values.get("brightness_pct"), int):
+            controls.append({"type": "slider_item", "id": "brightness", "icon": "brightness", "label": "Brightness",
+                             "step": 1, "commit": "confirm", "visual": {"type": "bar", "id": "level",
+                             "min": 0, "max": 100, "value": values["brightness_pct"]}})
+        if "set_color_temperature" in caps \
+                and isinstance(values.get("color_temperature_k"), int):
+            controls.append({"type": "slider_item", "id": "color_temp", "icon": "color_temperature", "label": "Color temperature (K)",
+                             "step": 100, "commit": "confirm", "visual": {"type": "bar", "id": "kelvin",
+                             "min": 1000, "max": 40000, "value": values["color_temperature_k"]}})
+        if "set_color" in caps and all(
+                isinstance(values.get(field), (int, float))
+                for field in ("hue_degrees", "saturation_pct", "color_value_pct")):
+            for item_id, label, field, maximum, icon in (("hue", "Hue", "hue_degrees", 360, "palette"),
+                                                         ("saturation", "Saturation", "saturation_pct", 100, "saturation"),
+                                                         ("color_value", "Color value", "color_value_pct", 100, "color_value")):
+                controls.append({"type": "slider_item", "id": item_id, "icon": icon, "label": label,
+                                 "step": 1, "commit": "confirm", "visual": {"type": "bar", "id": item_id + "_bar",
+                                 "min": 0, "max": maximum, "value": values[field]}})
+        if "set_thermostat_temperature" in caps and isinstance(values.get("target_temperature_c"), (int, float)):
+            low, high = wire.thermostat_range(self._thermostats[target])
+            controls.append({"type": "slider_item", "id": "temperature", "icon": "thermostat", "label": "Temperature (C)",
+                             "step": 0.5, "commit": "confirm", "visual": {"type": "bar", "id": "temp",
+                             "min": low, "max": high, "value": max(low, min(high, values["target_temperature_c"]))}})
+        if "set_thermostat_mode" in caps:
+            modes = wire.thermostat_modes(self._thermostats[target])
+            if values.get("mode") in modes:
+                controls.append({"type": "choice_item", "id": "mode", "icon": "adjust", "label": "Mode",
+                                 "options": [{"id": mode, "label": mode.replace("-", " ").replace("_", " ").capitalize()} for mode in modes],
+                                 "selected": values["mode"]})
+            else:
+                controls.append({"type": "action_item", "id": "mode", "icon": "adjust", "label": "Mode unavailable", "disabled": True})
+        if unavailable:
+            for control in controls:
+                control["disabled"] = True
+        return controls
+
     async def menu_children(self, menu_id: str, page_id: str, cursor: str | None):
         if menu_id not in ("rooms", "room_devices", "devices", "automations"):
             raise IntegrationError(ErrorCode.INVALID_ARGUMENT, "Unknown Google Home menu.")
+        options = self._menu_options.get(menu_id, {})
         if menu_id == "automations":
             await self._refresh_automations()
-            entries = [(key, entry.display_name, entry.enabled) for key, entry in self._automations.items()]
+            # Every listed automation can be run manually (as in Google Home's play
+            # button); row[2] is not a manual-run flag, so it never disables an item.
+            entries = [(key, entry.display_name, True) for key, entry in self._automations.items()]
         elif menu_id == "rooms":
             entries = [(key, room.display_name, "toggle_room_power" in self._room_capabilities(key))
                        for key, room in self._rooms.items()]
         else:
-            allowed = (set(self._rooms[self._menu_room].device_ids) if self._menu_room in self._rooms
-                       else set()) if menu_id == "room_devices" else None
-            entries = []
-            for entry in self._devices.values():
-                light_id = wire.object_id(self._structure_id, entry.google_device_id)
-                if allowed is not None and entry.google_device_id not in allowed:
-                    continue
-                thermostat_id = wire.stable_id("thermostat", self._structure_id, entry.google_device_id)
-                key = thermostat_id if thermostat_id in self._thermostats else light_id
-                entries.append((key, entry.display_name,
-                                bool(self._thermostat_caps.get(key)) if key in self._thermostats else
-                                "toggle_power" in self._capabilities.get(key, ())))
+            entries = self._device_entries((set(self._rooms[self._menu_room].device_ids)
+                                            if self._menu_room in self._rooms else set())
+                                           if menu_id == "room_devices" else None)
         entries.sort(key=lambda item: (item[1].casefold(), item[0]))
+        target = self._menu_key(page_id[2:]) if page_id != "root" else None
+        if page_id != "root" and target is None:
+            raise IntegrationError(ErrorCode.TARGET_MISSING, "The selected device is unavailable.")
+        parent_room = None
+        if menu_id == "rooms" and page_id != "root":
+            parent_room = target if target in self._rooms else self._room_of(target)
+            if parent_room is None:
+                raise IntegrationError(ErrorCode.TARGET_MISSING, "The selected device is unavailable.")
         try:
-            offset = int(cursor) if cursor is not None else (self._menu_offset if page_id != "root" else 0)
+            if cursor is not None:
+                offset = int(cursor)
+            else:                              # a sub-page's parent is the root page that lists it
+                shown = parent_room if parent_room is not None else target
+                offset = next((i for i, entry in enumerate(entries) if entry[0] == shown), 0) // 25 * 25
         except (TypeError, ValueError):
             raise IntegrationError(ErrorCode.INVALID_ARGUMENT, "Invalid menu cursor.") from None
         if offset < 0 or offset > len(entries):
             raise IntegrationError(ErrorCode.INVALID_ARGUMENT, "Invalid menu cursor.")
-        self._menu_offset = offset
-        selected = entries[offset:offset + 25]
-        self._menu_targets = {"i_" + key.split(":")[-1][:24]: key for key, _, _ in selected}
         items, pages = [], []
-        for key, name, supported in selected:
-            item_id = "i_" + key.split(":")[-1][:24]
-            item = {"type": "action_item", "id": item_id, "label": _label(name),
-                    "disabled": not supported}
-            if menu_id in ("devices", "room_devices") and supported:
-                # A single confirm always opens the device's submenu of every
-                # control it has; a double press toggles it directly (a mappable
-                # menu alternate), but only when it is actually toggleable.
-                item["opens"] = "p_" + key.split(":")[-1][:24]
-                pages.append({"type": "page", "id": item["opens"], "title": _label(name),
-                              "lazy": True, "items": []})
-                if "toggle_power" in self._capabilities.get(key, ()) \
-                        or "toggle_thermostat" in self._thermostat_caps.get(key, ()):
+        for key, name, supported in entries[offset:offset + 25]:
+            suffix = key.split(":")[-1][:24]
+            if menu_id in ("devices", "room_devices"):
+                items.append(self._device_row(key, name, supported, options.get("confirm_device") == DEVICE_TOGGLE, pages))
+                continue
+            item = {"type": "action_item", "id": "i_" + suffix, "label": _label(name),
+                    "icon": "automation" if menu_id == "automations" else "room", "disabled": not supported}
+            if menu_id == "automations" and options.get("confirm_automation") == AUTOMATION_TWICE:
+                item["confirm"] = True
+            if menu_id == "rooms" and options.get("confirm_room") == ROOM_OPEN:
+                item["disabled"] = False
+                item["opens"] = "r_" + suffix
+                pages.append({"type": "page", "id": item["opens"], "title": _label(name), "lazy": True, "items": []})
+                if supported:
                     item["alternates"] = {"double": {"id": "toggle", "label": "Toggle"}}
             items.append(item)
         title = {"rooms": "Rooms", "room_devices": "Room devices", "devices": "Home devices",
                  "automations": "Automations"}[menu_id]
         root = {"type": "page", "id": "root", "title": title, "items": items}
-        if page_id != "root":
-            target = self._menu_targets.get("i_" + page_id.removeprefix("p_"))
+        if parent_room is not None:
+            room_page = "r_" + parent_room.split(":")[-1][:24]
+            if not any(page["id"] == room_page for page in pages):
+                pages.append({"type": "page", "id": room_page, "title": _label(self._rooms[parent_room].display_name),
+                              "lazy": True, "items": []})
+                for item in items:             # the Controls window's default rows toggle instead
+                    if item["id"] == "i_" + parent_room.split(":")[-1][:24]:
+                        item.update(opens=room_page, disabled=False)
+            room_items = self._room_page_items(parent_room, pages)
+            for page in pages:
+                if page["id"] == room_page:
+                    page.update(lazy=False, items=room_items, empty_label="No devices in this room")
+        if page_id.startswith("p_"):
             if target not in self._lights and target not in self._thermostats:
                 raise IntegrationError(ErrorCode.TARGET_MISSING, "The selected device is unavailable.")
-            states = await self.read_states([target])
-            values = states[0].values if states else {}
-            unavailable = not states or not states[0].available
-            controls = []
-            caps = self._capabilities.get(target, self._thermostat_caps.get(target, ()))
-            # The submenu always lists every control the device supports.
-            if "toggle_power" in caps or "toggle_thermostat" in caps:
-                on = values.get("on")
-                if not isinstance(on, bool) and isinstance(values.get("mode"), str):
-                    on = values["mode"] != "off"
-                if isinstance(on, bool):
-                    controls.append({"type": "toggle_item", "id": "power", "label": "Power", "on": on})
-                else:
-                    controls.append({"type": "action_item", "id": "power", "label": "Power unavailable", "disabled": True})
-            if "set_brightness" in caps and isinstance(values.get("brightness_pct"), int):
-                controls.append({"type": "slider_item", "id": "brightness", "label": "Brightness",
-                                 "step": 1, "commit": "confirm", "visual": {"type": "bar", "id": "level",
-                                 "min": 0, "max": 100, "value": values["brightness_pct"]}})
-            if "set_color_temperature" in caps \
-                    and isinstance(values.get("color_temperature_k"), int):
-                controls.append({"type": "slider_item", "id": "color_temp", "label": "Color temperature (K)",
-                                 "step": 100, "commit": "confirm", "visual": {"type": "bar", "id": "kelvin",
-                                 "min": 1000, "max": 40000, "value": values["color_temperature_k"]}})
-            if "set_color" in caps and all(
-                    isinstance(values.get(field), (int, float))
-                    for field in ("hue_degrees", "saturation_pct", "color_value_pct")):
-                for item_id, label, field, maximum in (("hue", "Hue", "hue_degrees", 360),
-                                                       ("saturation", "Saturation", "saturation_pct", 100),
-                                                       ("color_value", "Color value", "color_value_pct", 100)):
-                    controls.append({"type": "slider_item", "id": item_id, "label": label,
-                                     "step": 1, "commit": "confirm", "visual": {"type": "bar", "id": item_id + "_bar",
-                                     "min": 0, "max": maximum, "value": values[field]}})
-            if "set_thermostat_temperature" in caps and isinstance(values.get("target_temperature_c"), (int, float)):
-                low, high = wire.thermostat_range(self._thermostats[target])
-                controls.append({"type": "slider_item", "id": "temperature", "label": "Temperature (C)",
-                                 "step": 0.5, "commit": "confirm", "visual": {"type": "bar", "id": "temp",
-                                 "min": low, "max": high, "value": max(low, min(high, values["target_temperature_c"]))}})
-            if "set_thermostat_mode" in caps:
-                modes = wire.thermostat_modes(self._thermostats[target])
-                if values.get("mode") in modes:
-                    controls.append({"type": "choice_item", "id": "mode", "label": "Mode",
-                                     "options": [{"id": mode, "label": mode.replace("-", " ").replace("_", " ").capitalize()} for mode in modes],
-                                     "selected": values["mode"]})
-                else:
-                    controls.append({"type": "action_item", "id": "mode", "label": "Mode unavailable", "disabled": True})
-            if unavailable:
-                for control in controls:
-                    control["disabled"] = True
+            controls = await self._device_controls(target)
+            if not any(page["id"] == page_id for page in pages):
+                pages.append({"type": "page", "id": page_id, "title": self._menu_label(target), "items": []})
             for page in pages:
                 if page["id"] == page_id:
                     page.update(lazy=False, items=controls, empty_label="No available controls")
@@ -788,7 +901,7 @@ class GoogleHomeProvider(Provider):
             return _label(automation.display_name)
         return "Google Home"
 
-    async def _menu_toast(self, key: str, action_label: str, phase: str) -> None:
+    async def _menu_toast(self, key: str, action_label: str, phase: str, reason: str = "") -> None:
         """A brief success/error toast for a control used from inside a menu.
         Menu events bypass the host's action-feedback path, so the provider
         shows this itself. Feedback must never break the control path."""
@@ -805,7 +918,7 @@ class GoogleHomeProvider(Provider):
                         {"type": "status", "tone": phase, "pulse": phase == "pending"},
                         {"type": "text", "role": "caption", "tone": phase, "text": {
                             "pending": "Sending…", "success": "Request accepted",
-                            "error": "Failed", "unknown": "Outcome unknown"}[phase]}]},
+                            "error": reason or "Failed", "unknown": "Outcome unknown"}[phase]}]},
                     {"type": "progress", "tone": phase,
                      **({"indeterminate": True} if phase == "pending" else {"value": 1 if phase == "success" else 0})}]},
             }, permission_id="google_home.toast")
@@ -821,28 +934,38 @@ class GoogleHomeProvider(Provider):
         except Exception as error:
             if sequence == self._toast_sequence:
                 await self._menu_toast(key, action_label,
-                                       "unknown" if getattr(getattr(error, "info", error), "outcome_unknown", False) else "error")
+                                       "unknown" if getattr(getattr(error, "info", error), "outcome_unknown", False) else "error",
+                                       getattr(error, "message", "") or "")
             raise
         if sequence == self._toast_sequence:
             await self._menu_toast(key, action_label, "success")
 
     async def on_menu_event(self, menu_id: str, event: dict) -> None:
         kind = event.get("kind")
+        if kind == "closed":
+            self._menu_options.pop(menu_id, None)
+            return
         if kind not in ("select", "alternate"):
             return
         item, page = event.get("item"), event.get("page")
-        key = self._menu_targets.get(item if page == "root" else "i_" + str(page).removeprefix("p_"))
+        named = str(item) if str(item).startswith("i_") else str(page)
+        key = self._menu_key(named[2:])
         if key is None:
             return
         if kind == "alternate":
-            # Double-press a device to toggle it (declared alternate).
+            # Double-press a row to toggle it (declared alternate).
             if event.get("alternate") == "toggle":
-                await self._menu_write(key, "Toggle", self._toggle_device(key))
+                if key in self._rooms:
+                    await self._menu_write(key, "Toggle room", self.toggle_room_power({"object_id": key}))
+                else:
+                    await self._menu_write(key, "Toggle", self._toggle_device(key))
             return
-        if menu_id == "automations":
+        if key in self._automations:
             await self._menu_write(key, "Run", self.run_automation({"object_id": key}))
-        elif menu_id == "rooms":
+        elif key in self._rooms:
             await self._menu_write(key, "Toggle room", self.toggle_room_power({"object_id": key}))
+        elif str(item).startswith("i_"):       # a row that opens a page never sends select
+            await self._menu_write(key, "Toggle", self._toggle_device(key))
         elif item == "brightness":
             await self._menu_write(key, f"Brightness: {int(event['value'])}%", self.set_brightness(
                 {"object_id": key, "brightness_pct": int(event["value"])}))

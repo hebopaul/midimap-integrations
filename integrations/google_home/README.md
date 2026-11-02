@@ -37,9 +37,12 @@ change without notice.
   distinguish failure from an unknown outcome. Use a host supporting the
   `$feedback.*` presentation bindings.
 - Each target field declares its collection, so automation, light, room and
-  thermostat choices cannot mix. Disabled automations keep the declared run
-  capability and report enabled=false; their menu entries are disabled and
-  execution refuses them. No fictional capability IDs are returned.
+  thermostat choices cannot mix. No fictional capability IDs are returned.
+- Version 0.1.11 (reissued as 0.1.12 with setup notes) runs every listed automation, like the play button in Google
+  Home. A live check (2026-10-31) showed that household automations such as
+  "Center-off" leave the list's field 2 empty yet run when executed manually,
+  so that field (still reported as `enabled`) no longer disables menu entries
+  or refuses a run.
 - Light color, color temperature and room power/brightness commands use the
   same guarded acknowledgement checks. Room power state is available only
   when all its discovered lights report an online on/off state.
@@ -58,19 +61,18 @@ change without notice.
 
 1. Install the package in a host build that supports manifest format 3. Create
    an instance and approve its Google Home session permission.
-2. Open **Connect Google Home**. MIDImap opens installed Chrome in a fresh,
-   isolated per-instance profile under local application data. Sign in there;
-   a sign-in in your ordinary Chrome profile is separate.
-3. Open Google Home **Devices** and finish signing in. Click **Find homes** in
-   MIDImap. It closes the ordinary setup window and reopens the same isolated
-   profile with inspection enabled. If more than one Google Home tab is open,
-   choose the right tab and click **Find homes** again. MIDImap makes an
-   independent read-only `GetHomeGraph` request before showing the account and
-   home choices.
-4. Choose the home and click **Use this home**. The verified session is saved
-   in Windows credential storage. Close the setup window when finished. Its
-   loopback Chrome inspection port is reachable by other local processes after
-   **Find homes**, while the reopened setup window is open.
+2. Open **Connect Google Home** and choose **Connect**. If this instance's
+   isolated Chrome profile is already signed in, MIDImap reads your homes right
+   away. Otherwise MIDImap opens installed Chrome in a fresh, isolated
+   per-instance profile under local application data. Sign in there; a sign-in
+   in your ordinary Chrome profile is separate.
+3. Close that window when you are signed in (or choose **I've signed in**).
+   MIDImap reopens the same profile with inspection enabled by itself and makes
+   an independent read-only `GetHomeGraph` request before showing the homes.
+4. With one home, MIDImap connects it directly; otherwise choose the home and
+   **Use this home**. The verified session is saved in Windows credential
+   storage and the inspection window is closed. Its loopback Chrome inspection
+   port is reachable by other local processes only while that window is open.
 5. Use **Disconnect** to delete the saved session and isolated profile after
    the owned Chrome process exits. Headless mode never launches Chrome.
 

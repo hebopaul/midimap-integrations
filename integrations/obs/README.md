@@ -1,16 +1,61 @@
-# OBS Studio development reference package
+# OBS Studio
 
-C5 steps 2 / 3a: a Windows x64 SDK worker using MIDImap's host WebSocket broker.
-The initial qualification target is OBS **32.0.2 / obs-websocket 5.6.3, RPC 1**.
-Evidence is recorded in `supervision/023_result.md` (step 3a) and the preserved step-2 review; real OBS, packaged MIDImap
-and release qualification are separate gates. Missing required UUID/audio
-features fail explicitly. Older versions are not claimed as tested support.
+Run a stream from a MIDI controller. Version 0.2.3 needs OBS 31.1 or later
+(obs-websocket 5.6) with its WebSocket server on: in OBS, Tools, WebSocket Server
+Settings. Qualified against OBS 32.0.2 / obs-websocket 5.6.3, RPC 1, using an
+isolated portable copy. **Going live to a real streaming service has not been
+exercised**; everything else below has run against real OBS.
+
+## What it controls
+
+| Area | Controls |
+|---|---|
+| Stream | Toggle, start, stop |
+| Recording | Toggle, start, stop, pause, resume, chapter marker |
+| Replay buffer | Toggle, start, stop, **save clip** |
+| Virtual camera | Toggle, start, stop |
+| Scenes | Switch, next, previous, screenshot to a folder |
+| Studio mode | Toggle, set, preview scene, cut to program |
+| Audio | Mute (toggle or set), **volume on a fader or knob**, volume step for buttons |
+| Sources | Show or hide in a scene, including inside groups |
+| Filters | Toggle or set, on any source or scene |
+| Transitions | Choose the transition, set its duration |
+| Media | Play, pause, restart, stop, next, previous |
+| OBS itself | Scene collection, profile, any hotkey by name |
+
+Volume uses OBS's own slider curve, so 50% on a MIDI fader puts OBS's slider at
+50%. Start and stop actions succeed when OBS is already there, so a macro doesn't
+fail on them.
+
+**Menus:** the same controls appear in the MIDI overlay (`OBS Control`, or Scenes,
+Audio mixer and Sources directly) and in MIDImap's **Controls** panel, which opens
+from the integration card or the tray. Start and stop streaming ask for a second
+press in both places.
+
+**Toasts:** state OBS confirms is shown when it happens, wherever it came from:
+stream reconnecting, recording started, clip saved. OBS accepts some starts it then
+abandons (a bad recording folder, no stream service); after 10 seconds without a
+confirmed start a toast says so. Toasts can be silenced per integration in Settings.
+A mapping set to Suppress toast notification shows no toast for what it did, but a
+stream that drops or reconnects still warns you.
+
+**Set up common controls** on the integration card walks through the usual
+assignments: click Assign, press a control.
+
+## Limits
+
+- Fader volume needs an absolute CC. Endless encoders can use the volume step
+  action on separate clockwise and counter-clockwise mappings.
+- Filters are addressed by name, because OBS gives them no ID: renaming a filter
+  breaks a mapping to it. Scenes, inputs and sources keep working after a rename.
+- There is no live preview image: the host's message limit is 128 KiB. Screenshots
+  save to disk on the computer running OBS.
+- Controller button LEDs don't follow OBS state yet.
 
 ## Setup and behavior
 
-Import the development package, create an OBS instance, enter the OBS computer
-(127.0.0.1 for this PC) and server port (normally 4455), and approve the displayed
-exact endpoint. The declaration uses `/` and `obswebsocket.json`. Plain
+Install the package and create an OBS instance. The OBS computer (127.0.0.1) and
+server port (4455) are filled in for you; approve the displayed exact endpoint. The declaration uses `/` and `obswebsocket.json`. Plain
 WebSocket consent explains that it is unencrypted; the host permits only
 loopback/private destinations. Changed endpoints require their own grant.
 Enter the password using MIDImap's separate secret field/permission, never
@@ -66,7 +111,7 @@ build/integration-reconnect-023/builder-venv/Scripts/python.exe -m pip install -
 build/integration-reconnect-023/builder-venv/Scripts/python.exe -m pip install --no-build-isolation --no-deps ./sdk/python
 build/integration-reconnect-023/builder-venv/Scripts/python.exe -B sdk/python/tools/build_package.py --source sdk/python/examples/obs --out build/integration-reconnect-023
 .venv/Scripts/python.exe -B -m unittest src.tests.test_integration_obs src.tests.test_integration_obs_broker src.tests.test_integration_obs_cleanup src.tests.test_integrations_reconnect src.tests.test_integration_obs_reconnect
-.venv/Scripts/python.exe -B -m src.tests._smoke_obs_reconnect --package build/integration-reconnect-023/org.midimap.obs-0.1.0.midimap-integration --out build/integration-reconnect-023/package-check
+.venv/Scripts/python.exe -B -m src.tests._smoke_obs_reconnect --package build/integration-reconnect-023/org.midimap.obs-0.2.0.midimap-integration --out build/integration-reconnect-023/package-check
 ```
 
 Offline builds may add `--no-index --find-links build/integration-sdk/wheels`

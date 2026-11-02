@@ -183,7 +183,7 @@ class _BoundedFormatter(logging.Formatter):
         return text if len(text) <= limit else text[:limit - 3] + "..."
 
 
-def configure_logging(level: int = logging.WARNING) -> None:
+def configure_logging(level: int = logging.INFO) -> None:
     """Send all logging to stderr with records cut to a bounded length."""
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(_BoundedFormatter("%(levelname)s %(name)s: %(message)s"))
@@ -191,7 +191,7 @@ def configure_logging(level: int = logging.WARNING) -> None:
 
 
 def run_worker(factory: Callable[[], Provider], manifest_path: str | os.PathLike, *,
-               log_level: int = logging.WARNING) -> int:
+               log_level: int = logging.INFO) -> int:
     """Serve MIDImap on this process's standard streams; returns an exit code.
 
     The protocol streams are claimed *before* `factory()` runs, so import

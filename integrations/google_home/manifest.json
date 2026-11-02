@@ -2,7 +2,7 @@
   "format_version": 4,
   "protocol_version": 1,
   "id": "org.midimap.google-home",
-  "version": "0.1.8",
+  "version": "0.1.15",
   "name": "Google Home",
   "author": "MIDImap development team",
   "description": "Control lights and run automations in a selected Google Home through a host-managed browser session. Development package; Google's private web protocol requires live qualification.",
@@ -584,7 +584,16 @@
       "uses_menu": true,
       "input_schema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "confirm_room": {
+            "type": "string",
+            "title": "Pressing confirm on a room",
+            "enum": [
+              "Toggle the room's lights",
+              "Open the room's devices"
+            ]
+          }
+        },
         "required": [],
         "additionalProperties": false
       },
@@ -612,6 +621,14 @@
             "title": "Room",
             "minLength": 1,
             "maxLength": 128
+          },
+          "confirm_device": {
+            "type": "string",
+            "title": "Pressing confirm on a device",
+            "enum": [
+              "Open its controls",
+              "Toggle it"
+            ]
           }
         },
         "required": [
@@ -638,7 +655,16 @@
       "uses_menu": true,
       "input_schema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "confirm_device": {
+            "type": "string",
+            "title": "Pressing confirm on a device",
+            "enum": [
+              "Open its controls",
+              "Toggle it"
+            ]
+          }
+        },
         "required": [],
         "additionalProperties": false
       },
@@ -660,7 +686,16 @@
       "uses_menu": true,
       "input_schema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "confirm_automation": {
+            "type": "string",
+            "title": "Pressing confirm on an automation",
+            "enum": [
+              "Run it",
+              "Press twice to run it"
+            ]
+          }
+        },
         "required": [],
         "additionalProperties": false
       },
@@ -1268,20 +1303,16 @@
   },
   "card": {
     "icon": "brand",
-    "accent": "#64C5A8",
+    "accent": "#4285F4",
     "angle": 135,
     "gradient": [
       {
         "position": 0,
-        "color": "#164238"
-      },
-      {
-        "position": 0.45,
-        "color": "#336BA3"
+        "color": "#FFFFFF"
       },
       {
         "position": 1,
-        "color": "#7754AB"
+        "color": "#E8F0FE"
       }
     ]
   }

@@ -20,9 +20,6 @@ The SDK has been tested against the host protocol engine in process, over real
 pipes under development Python, and as a frozen simulator behind the supervisor
 on ordinary Windows 11. See [process verification and remaining gates](integration-processes.md).
 Elevated-host and clean Windows without Python still need real verification.
-The former declarative `.midimap-pack` YAML format is superseded; do not use it
-for new work or assume it can be imported by this design.
-
 ## What you build
 
 Write ordinary integration code that authenticates with a provider, discovers
@@ -432,8 +429,18 @@ headers or credentials, and a returned status is acceptance, not physical
 confirmation.
 
 The setup browser uses a per-instance profile under the user's local MIDImap
-application data. Human sign-in starts without remote debugging. After sign-in,
-**Find homes** reopens that same profile with inspection enabled. The profile
+application data, in the user's default browser when it is Chromium-based
+(else Chrome, then Edge, Brave or Vivaldi); the profile records that browser and
+keeps it. Human sign-in starts without remote debugging, because Google can
+reject a sign-in in a browser launched for debugging. **Connect** first checks a
+profile that is already signed in with a hidden (headless) browser, by Google
+sign-in cookie name, and reads the homes with no window at all. Otherwise one
+plain window opens on Google's sign-in page with Google Home as its continue
+target. When Google Home loads in that window (its title), MIDImap closes it as
+the X button would, so the browser saves its cookies, and reads the homes
+headlessly. Closing the window, or **I've signed in**, continues the same way. A
+single home is connected without a choice. Inspection is always headless and
+ends when the session is saved. The profile
 contains sign-in state and persists across app restarts so the same account can
 be used for later setup. Disconnect deletes the saved session and this profile
 after the owned Chrome process exits. While the inspection window is open,
@@ -690,6 +697,28 @@ frozen worker.
 Packages remain trusted executable code: the SDK validates its own protocol
 traffic but is not a sandbox, and MIDImap checks every host-service call
 against the user's grants regardless of what the SDK reports.
+
+## Logging
+
+MIDImap logs what it can see for every integration, with nothing for you to do:
+each action, menu event and brokered call, with its status code, duration and
+error code. Those entries are written to the log files.
+
+Use Python's `logging` for anything else, especially failures. `INFO` and above
+appear live in the Logs window, under your instance's name, and the SDK adds a line
+for every failed action with its reason. Your wording is never written to disk: a
+worker could echo a secret it has read, so the files only record that a line was
+shown. Still don't log secrets. Log what you tried and what came back, so someone
+reading the window can tell which step failed.
+
+## Suppressing toasts
+
+An action fired by a mapping set to Suppress toast notification has no host feedback.
+If your provider shows its own toast about what an action caused, check
+`toast_suppressed()` while handling the action.
+
+The former declarative `.midimap-pack` YAML format is superseded; do not use it
+for new work or assume it can be imported by this design.
 
 ## The worker's environment
 

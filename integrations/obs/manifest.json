@@ -2,10 +2,10 @@
   "format_version": 4,
   "protocol_version": 1,
   "id": "org.midimap.obs",
-  "version": "0.1.1",
+  "version": "0.2.3",
   "name": "OBS Studio",
   "author": "MIDImap development team",
-  "description": "Switch OBS scenes and set audio mute through MIDImap's managed connection. Initial qualification target: OBS 32.0.2 / obs-websocket 5.6.3, RPC 1. Development reference package.",
+  "description": "Run your stream from a MIDI controller: scenes, streaming, recording, clips, virtual camera, studio mode, audio faders, sources, filters, transitions and media, with on-screen menus and a Controls panel. Needs OBS 31.1 or later with its WebSocket server on.",
   "target": "windows-x64",
   "entrypoint": "worker/integration-worker.exe",
   "config_schema_version": 1,
@@ -74,15 +74,856 @@
         "field": "server_password"
       },
       "required_for_initialization": false
+    },
+    {
+      "id": "obs.menu",
+      "kind": "ui.overlay",
+      "description": "Display OBS controls in the MIDI menu and the Controls panel.",
+      "scope": {
+        "surface": "menu"
+      },
+      "required_for_initialization": false
+    },
+    {
+      "id": "obs.toast",
+      "kind": "ui.overlay",
+      "description": "Show brief on-screen confirmations, such as recording started or stream reconnecting. You can silence them in Settings.",
+      "scope": {
+        "surface": "toast"
+      },
+      "required_for_initialization": true
     }
   ],
   "actions": [
+    {
+      "id": "open_control_menu",
+      "name": "Open OBS control menu",
+      "description": "Open the full OBS menu: live, scenes, audio, sources, transitions, media and settings.",
+      "permissions": [
+        "obs.connect",
+        "obs.menu"
+      ],
+      "uses_menu": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirm_scene": {
+            "type": "string",
+            "title": "Pressing confirm on a scene",
+            "enum": [
+              "Follow studio mode",
+              "Put it on air",
+              "Press twice to put it on air"
+            ]
+          },
+          "confirm_input": {
+            "type": "string",
+            "title": "Pressing confirm on an audio input",
+            "enum": [
+              "Open its controls",
+              "Toggle mute"
+            ]
+          },
+          "confirm_source": {
+            "type": "string",
+            "title": "Pressing confirm on a source",
+            "enum": [
+              "Open its controls",
+              "Show or hide it"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "completion": "Opened the OBS menu."
+    },
+    {
+      "id": "open_scenes_menu",
+      "name": "Open scenes menu",
+      "description": "Open a menu of your OBS scenes.",
+      "permissions": [
+        "obs.connect",
+        "obs.menu"
+      ],
+      "uses_menu": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirm_scene": {
+            "type": "string",
+            "title": "Pressing confirm on a scene",
+            "enum": [
+              "Follow studio mode",
+              "Put it on air",
+              "Press twice to put it on air"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "completion": "Opened the OBS menu."
+    },
+    {
+      "id": "open_mixer_menu",
+      "name": "Open audio mixer menu",
+      "description": "Open a menu to mute and set the volume of OBS audio inputs.",
+      "permissions": [
+        "obs.connect",
+        "obs.menu"
+      ],
+      "uses_menu": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirm_input": {
+            "type": "string",
+            "title": "Pressing confirm on an audio input",
+            "enum": [
+              "Open its controls",
+              "Toggle mute"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "completion": "Opened the OBS menu."
+    },
+    {
+      "id": "open_sources_menu",
+      "name": "Open sources menu",
+      "description": "Open a menu to show and hide the current scene's sources and their filters.",
+      "permissions": [
+        "obs.connect",
+        "obs.menu"
+      ],
+      "uses_menu": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirm_source": {
+            "type": "string",
+            "title": "Pressing confirm on a source",
+            "enum": [
+              "Open its controls",
+              "Show or hide it"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "completion": "Opened the OBS menu."
+    },
+    {
+      "id": "toggle_stream",
+      "name": "Toggle streaming",
+      "description": "Go live, or stop streaming if already live.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "start_stream",
+      "name": "Start streaming",
+      "description": "Go live. Does nothing if already live.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "stop_stream",
+      "name": "Stop streaming",
+      "description": "End the stream. Does nothing if not live.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "toggle_record",
+      "name": "Toggle recording",
+      "description": "Start recording, or stop if already recording.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "start_record",
+      "name": "Start recording",
+      "description": "Start recording. Does nothing if already recording.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "stop_record",
+      "name": "Stop recording",
+      "description": "Stop recording. Does nothing if not recording.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "toggle_record_pause",
+      "name": "Toggle recording pause",
+      "description": "Pause the recording, or resume it if paused.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "pause_record",
+      "name": "Pause recording",
+      "description": "Pause the recording.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "resume_record",
+      "name": "Resume recording",
+      "description": "Resume a paused recording.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "add_record_chapter",
+      "name": "Add recording chapter",
+      "description": "Add a chapter marker to the recording. Needs an output format that supports chapters, such as Hybrid MP4.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "save_replay",
+      "name": "Save clip",
+      "description": "Save the replay buffer to disk, keeping the last moments as a clip.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request and is saving the clip.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "toggle_replay_buffer",
+      "name": "Toggle replay buffer",
+      "description": "Start the replay buffer, or stop it if running.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "start_replay_buffer",
+      "name": "Start replay buffer",
+      "description": "Start the replay buffer.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "stop_replay_buffer",
+      "name": "Stop replay buffer",
+      "description": "Stop the replay buffer.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "toggle_virtual_camera",
+      "name": "Toggle virtual camera",
+      "description": "Start the virtual camera, or stop it if running.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "start_virtual_camera",
+      "name": "Start virtual camera",
+      "description": "Start the virtual camera.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "stop_virtual_camera",
+      "name": "Stop virtual camera",
+      "description": "Stop the virtual camera.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
     {
       "id": "switch_scene",
       "name": "Switch scene",
       "description": "Make the chosen scene the program scene in OBS.",
       "permissions": [
-        "obs.connect"
+        "obs.connect",
+        "obs.toast"
       ],
       "input_schema": {
         "type": "object",
@@ -113,14 +954,354 @@
         ],
         "additionalProperties": false
       },
-      "completion": "OBS accepted the switch and started its transition to the scene; the transition may still be running. In studio mode the program scene changes, not the preview."
+      "completion": "OBS accepted the switch and started its transition to the scene; the transition may still be running. In studio mode the program scene changes, not the preview.",
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "scenes",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      }
+    },
+    {
+      "id": "next_scene",
+      "name": "Next scene",
+      "description": "Move one scene down the Scenes list, wrapping around. In studio mode this changes the preview.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "previous_scene",
+      "name": "Previous scene",
+      "description": "Move one scene up the Scenes list, wrapping around. In studio mode this changes the preview.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "toggle_studio_mode",
+      "name": "Toggle studio mode",
+      "description": "Turn studio mode on or off.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "set_studio_mode",
+      "name": "Set studio mode",
+      "description": "Turn studio mode on or off explicitly.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Studio mode on"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "set_preview_scene",
+      "name": "Set preview scene",
+      "description": "Show the chosen scene in the studio mode preview.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Scene"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS set the preview scene.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "scenes"
+    },
+    {
+      "id": "cut_to_program",
+      "name": "Cut to program",
+      "description": "Send the studio mode preview to program using the current transition.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS started the transition.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "toggle_input_mute",
+      "name": "Toggle input mute",
+      "description": "Mute the chosen audio input, or unmute it if muted.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Input"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS switched the input's mute state.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "inputs"
     },
     {
       "id": "set_input_mute",
       "name": "Set input mute",
       "description": "Mute or unmute the chosen OBS audio input. This sets the state; it does not toggle it.",
       "permissions": [
-        "obs.connect"
+        "obs.connect",
+        "obs.toast"
       ],
       "input_schema": {
         "type": "object",
@@ -160,7 +1341,871 @@
         ],
         "additionalProperties": false
       },
-      "completion": "OBS has set the input's mute state."
+      "completion": "OBS has set the input's mute state.",
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "inputs",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      }
+    },
+    {
+      "id": "set_input_volume",
+      "name": "Set input volume",
+      "description": "Set an audio input to a position on OBS's own slider. Works with a fader or knob.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Input"
+          },
+          "volume_pct": {
+            "type": "number",
+            "title": "Volume (%)",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "object_id",
+          "volume_pct"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS set the input's volume.",
+      "dispatch": {
+        "mode": "latest",
+        "key_arguments": [
+          "object_id"
+        ],
+        "min_interval_ms": 100
+      },
+      "feedback": {
+        "template": "level",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "inputs"
+    },
+    {
+      "id": "step_input_volume",
+      "name": "Change input volume",
+      "description": "Raise or lower an audio input by a fixed step, for buttons.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Input"
+          },
+          "step_pct": {
+            "type": "number",
+            "title": "Step (%, negative lowers)",
+            "minimum": -25,
+            "maximum": 25
+          }
+        },
+        "required": [
+          "object_id",
+          "step_pct"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS set the input's volume.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "inputs"
+    },
+    {
+      "id": "toggle_source_visible",
+      "name": "Toggle source visibility",
+      "description": "Show or hide a source in a scene.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Source"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS changed the source's visibility.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "scene_items"
+    },
+    {
+      "id": "set_source_visible",
+      "name": "Set source visibility",
+      "description": "Show or hide a source in a scene explicitly.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Source"
+          },
+          "visible": {
+            "type": "boolean",
+            "title": "Visible"
+          }
+        },
+        "required": [
+          "object_id",
+          "visible"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS changed the source's visibility.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "scene_items"
+    },
+    {
+      "id": "toggle_filter",
+      "name": "Toggle filter",
+      "description": "Turn a filter on or off.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Filter"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS changed the filter.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "filters"
+    },
+    {
+      "id": "set_filter_enabled",
+      "name": "Set filter",
+      "description": "Turn a filter on or off explicitly.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Filter"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "required": [
+          "object_id",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS changed the filter.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "filters"
+    },
+    {
+      "id": "set_transition",
+      "name": "Set transition",
+      "description": "Choose the transition OBS uses between scenes.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Transition"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS set the current transition.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "transitions"
+    },
+    {
+      "id": "set_transition_duration",
+      "name": "Set transition duration",
+      "description": "Set how long the current transition takes. Works with a fader or knob.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration (ms)",
+            "minimum": 50,
+            "maximum": 20000
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the request; the new state is reported when OBS confirms it.",
+      "feedback": {
+        "template": "command",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "toggle_media_playback",
+      "name": "Play or pause media",
+      "description": "Play a video or audio file source, or pause it if playing.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Media source"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the media command.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "media_inputs"
+    },
+    {
+      "id": "media_control",
+      "name": "Control media",
+      "description": "Play, pause, restart, stop or skip a video or audio file source.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Media source"
+          },
+          "command": {
+            "type": "string",
+            "title": "Command",
+            "enum": [
+              "play",
+              "pause",
+              "restart",
+              "stop",
+              "next",
+              "previous"
+            ]
+          }
+        },
+        "required": [
+          "object_id",
+          "command"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS accepted the media command.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "media_inputs"
+    },
+    {
+      "id": "switch_scene_collection",
+      "name": "Switch scene collection",
+      "description": "Change to another scene collection.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Scene collection"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS started changing the scene collection.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "scene_collections"
+    },
+    {
+      "id": "switch_profile",
+      "name": "Switch profile",
+      "description": "Change to another OBS profile.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Profile"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS started changing the profile.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "profiles"
+    },
+    {
+      "id": "trigger_hotkey",
+      "name": "Trigger OBS hotkey",
+      "description": "Run any OBS hotkey action by name, including those added by plugins.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Hotkey"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS ran the hotkey.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "hotkeys"
+    },
+    {
+      "id": "save_screenshot",
+      "name": "Save scene screenshot",
+      "description": "Save a PNG of a scene to a folder on the computer running OBS.",
+      "permissions": [
+        "obs.connect",
+        "obs.toast"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "title": "Scene"
+          },
+          "folder": {
+            "type": "string",
+            "title": "Folder on the OBS computer",
+            "minLength": 3,
+            "maxLength": 240
+          }
+        },
+        "required": [
+          "object_id",
+          "folder"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id"
+        ],
+        "additionalProperties": false
+      },
+      "completion": "OBS saved the screenshot.",
+      "dispatch": {
+        "mode": "ordered",
+        "key_arguments": [
+          "object_id"
+        ]
+      },
+      "feedback": {
+        "template": "device",
+        "show_on": [
+          "intent",
+          "success",
+          "error",
+          "unknown"
+        ]
+      },
+      "target_collection": "scenes"
     }
   ],
   "collections": [
@@ -173,12 +2218,15 @@
         "properties": {
           "program": {
             "type": "boolean"
+          },
+          "preview": {
+            "type": "boolean"
           }
         },
+        "additionalProperties": false,
         "required": [
           "program"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -190,11 +2238,133 @@
         "properties": {
           "muted": {
             "type": "boolean"
+          },
+          "volume_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
           }
         },
+        "additionalProperties": false,
         "required": [
           "muted"
-        ],
+        ]
+      }
+    },
+    {
+      "id": "outputs",
+      "name": "Outputs",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "reconnecting": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "active"
+        ]
+      }
+    },
+    {
+      "id": "scene_items",
+      "name": "Sources",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "filters",
+      "name": "Filters",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "transitions",
+      "name": "Transitions",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "media_inputs",
+      "name": "Media sources",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "playing": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "scene_collections",
+      "name": "Scene collections",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "profiles",
+      "name": "Profiles",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "hotkeys",
+      "name": "Hotkeys",
+      "state_ttl_seconds": 3600,
+      "state_schema": {
+        "type": "object",
+        "properties": {},
         "additionalProperties": false
       }
     }
@@ -207,30 +2377,294 @@
     "min_midimap_version": "0.8.0",
     "min_midimap_build": "20261029002",
     "capabilities": [
-      "network.websocket"
+      "network.websocket",
+      "ui.overlay"
     ]
   },
   "card": {
     "icon": "brand",
-    "accent": "#AD99F5",
+    "accent": "#9FA3AE",
     "angle": 135,
     "gradient": [
       {
         "position": 0,
-        "color": "#41385F"
-      },
-      {
-        "position": 0.45,
-        "color": "#7565A3"
+        "color": "#4A4A52"
       },
       {
         "position": 1,
-        "color": "#242130"
+        "color": "#1C1C20"
       }
     ]
   },
   "ui": {
     "spec_version": 1,
+    "templates": [
+      {
+        "id": "device",
+        "spec": {
+          "v": 1,
+          "toast_id": "obs",
+          "size": "standard",
+          "root": {
+            "type": "column",
+            "gap": 6,
+            "children": [
+              {
+                "type": "text",
+                "id": "target",
+                "role": "title",
+                "max_lines": 1,
+                "text": {
+                  "$bind": "$target.label",
+                  "default": "OBS Studio"
+                }
+              },
+              {
+                "type": "text",
+                "id": "action",
+                "role": "caption",
+                "tone": "muted",
+                "text": {
+                  "$bind": "$action.name",
+                  "default": ""
+                }
+              },
+              {
+                "type": "row",
+                "gap": 6,
+                "children": [
+                  {
+                    "type": "status",
+                    "id": "status_indicator",
+                    "tone": {
+                      "$bind": "$feedback.tone",
+                      "default": "muted"
+                    },
+                    "pulse": {
+                      "$bind": "$feedback.pending",
+                      "default": false
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "id": "status_text",
+                    "role": "caption",
+                    "tone": {
+                      "$bind": "$feedback.tone",
+                      "default": "muted"
+                    },
+                    "text": {
+                      "$bind": "$feedback.status",
+                      "default": ""
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "command",
+        "spec": {
+          "v": 1,
+          "toast_id": "obs",
+          "size": "standard",
+          "root": {
+            "type": "column",
+            "gap": 6,
+            "children": [
+              {
+                "type": "text",
+                "id": "target",
+                "role": "title",
+                "max_lines": 1,
+                "text": {
+                  "$bind": "$action.name",
+                  "default": "OBS Studio"
+                }
+              },
+              {
+                "type": "row",
+                "gap": 6,
+                "children": [
+                  {
+                    "type": "status",
+                    "id": "status_indicator",
+                    "tone": {
+                      "$bind": "$feedback.tone",
+                      "default": "muted"
+                    },
+                    "pulse": {
+                      "$bind": "$feedback.pending",
+                      "default": false
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "id": "status_text",
+                    "role": "caption",
+                    "tone": {
+                      "$bind": "$feedback.tone",
+                      "default": "muted"
+                    },
+                    "text": {
+                      "$bind": "$feedback.status",
+                      "default": ""
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "level",
+        "spec": {
+          "v": 1,
+          "toast_id": "obs",
+          "size": "standard",
+          "root": {
+            "type": "column",
+            "gap": 6,
+            "children": [
+              {
+                "type": "text",
+                "id": "target",
+                "role": "title",
+                "max_lines": 1,
+                "text": {
+                  "$bind": "$target.label",
+                  "default": "OBS Studio"
+                }
+              },
+              {
+                "type": "text",
+                "id": "action",
+                "role": "caption",
+                "tone": "muted",
+                "text": {
+                  "$bind": "$action.name",
+                  "default": ""
+                }
+              },
+              {
+                "type": "bar",
+                "id": "level",
+                "min": 0,
+                "max": 100,
+                "value": {
+                  "$bind": "$args.volume_pct",
+                  "default": 0
+                }
+              },
+              {
+                "type": "row",
+                "gap": 6,
+                "children": [
+                  {
+                    "type": "status",
+                    "id": "status_indicator",
+                    "tone": {
+                      "$bind": "$feedback.tone",
+                      "default": "muted"
+                    },
+                    "pulse": {
+                      "$bind": "$feedback.pending",
+                      "default": false
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "id": "status_text",
+                    "role": "caption",
+                    "tone": {
+                      "$bind": "$feedback.tone",
+                      "default": "muted"
+                    },
+                    "text": {
+                      "$bind": "$feedback.status",
+                      "default": ""
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "menus": [
+      {
+        "id": "control",
+        "title": "Control",
+        "dynamic": true,
+        "spec": {
+          "v": 1,
+          "surface": "menu",
+          "size": "standard",
+          "root": {
+            "type": "page",
+            "id": "root",
+            "title": "Control",
+            "lazy": true,
+            "items": []
+          }
+        }
+      },
+      {
+        "id": "scenes",
+        "title": "Scenes",
+        "dynamic": true,
+        "spec": {
+          "v": 1,
+          "surface": "menu",
+          "size": "standard",
+          "root": {
+            "type": "page",
+            "id": "root",
+            "title": "Scenes",
+            "lazy": true,
+            "items": []
+          }
+        }
+      },
+      {
+        "id": "mixer",
+        "title": "Audio mixer",
+        "dynamic": true,
+        "spec": {
+          "v": 1,
+          "surface": "menu",
+          "size": "standard",
+          "root": {
+            "type": "page",
+            "id": "root",
+            "title": "Audio mixer",
+            "lazy": true,
+            "items": []
+          }
+        }
+      },
+      {
+        "id": "sources",
+        "title": "Sources",
+        "dynamic": true,
+        "spec": {
+          "v": 1,
+          "surface": "menu",
+          "size": "standard",
+          "root": {
+            "type": "page",
+            "id": "root",
+            "title": "Sources",
+            "lazy": true,
+            "items": []
+          }
+        }
+      }
+    ],
     "icons": [
       {
         "id": "brand",

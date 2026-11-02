@@ -26,9 +26,10 @@ from typing import Any, Protocol
 OP_HELLO, OP_IDENTIFY, OP_IDENTIFIED = 0, 1, 2
 OP_EVENT, OP_REQUEST, OP_RESPONSE = 5, 6, 7
 RPC_VERSION = 1
-# EventSubscription bits: General | Config | Scenes | Inputs. High-volume
-# events (meters, show/active state) need their own bits and stay off.
-EVENT_SUBSCRIPTIONS = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3)
+# EventSubscription bits: General | Config | Scenes | Inputs | Transitions |
+# Filters | Outputs | SceneItems | MediaInputs | Ui. Vendors are not used.
+# High-volume events (meters, show/active state) need their own bits and stay off.
+EVENT_SUBSCRIPTIONS = sum(1 << bit for bit in (0, 1, 2, 3, 4, 5, 6, 7, 8, 10))
 
 UUID_VERSION = (5, 4, 0)       # scene and input UUIDs (OBS Studio 30.1 and later)
 CAPS_VERSION = (5, 6, 0)       # inputKindCaps in GetInputList (OBS Studio 31.1 and later)
@@ -44,6 +45,13 @@ STATUS_NOT_READY = 207
 STATUS_INVALID_RESOURCE_TYPE = 602
 STATUS_RESOURCE_NOT_FOUND = 600
 STATUS_INVALID_RESOURCE_STATE = 604
+STATUS_OUTPUT_RUNNING = 500
+STATUS_OUTPUT_NOT_RUNNING = 501
+STATUS_OUTPUT_PAUSED = 502
+STATUS_OUTPUT_NOT_PAUSED = 503
+STATUS_OUTPUT_DISABLED = 504
+STATUS_STUDIO_MODE_ACTIVE = 505
+STATUS_STUDIO_MODE_NOT_ACTIVE = 506
 
 MESSAGE_MAX_BYTES = 128 * 1024         # host complete-message UTF-8 limit
 MESSAGE_MAX_CHARS = MESSAGE_MAX_BYTES  # compatibility alias for existing tests

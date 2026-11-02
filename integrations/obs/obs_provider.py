@@ -47,6 +47,10 @@ from midimap_integration_sdk import (
     Page, Provider, Setup, State, WebSocketClosed, action,
 )
 
+from obs_controls import (
+    FILTERS, HOTKEYS, ITEMS, MEDIA, OUTPUTS, PROFILES, SCENE_COLLECTIONS, TRANSITIONS, ObsControls,
+    mul_to_percent,
+)
 from obs_protocol import (
     CAPS_VERSION, CLOSE_AUTHENTICATION_FAILED, CLOSE_SESSION_INVALIDATED,
     CLOSE_UNSUPPORTED_RPC_VERSION, STATUS_INVALID_RESOURCE_STATE, STATUS_INVALID_RESOURCE_TYPE,
@@ -146,6 +150,11 @@ class _Input:
     revision: int = 0
     present: bool = True
     mute_epoch: int | None = None      # the collection/load that established the mute value
+    volume: float | None = None        # OBS's linear multiplier
+    volume_epoch: int | None = None
+    kind: str = ""                     # the unversioned input kind
+    playing: bool | None = None        # media sources, once OBS has said
+    media_revision: int = 0
 
     @property
     def object_id(self) -> str:
@@ -177,7 +186,7 @@ class HostChannel:
         await self.websocket.close()
 
 
-class ObsProvider(Provider):
+class ObsProvider(ObsControls, Provider):
     def __init__(self, connect: Connector | None = None):
         self._connect = connect
         self._setup: Setup | None = None
@@ -194,13 +203,16 @@ class ObsProvider(Provider):
         self._epoch_changed = asyncio.Event()
         self._collection_changing = False
         self._too_many = False
-        self._catalog = {SCENES: 0, INPUTS: 0}   # listing versions: move on add/remove/rename
+        # listing versions: move on add/remove/rename
+        self._catalog = dict.fromkeys((SCENES, INPUTS, OUTPUTS, ITEMS, FILTERS, TRANSITIONS, MEDIA,
+                                       SCENE_COLLECTIONS, PROFILES, HOTKEYS), 0)
         self._announce_pending: set[str] = set()  # objects.changed not yet published
         self._mutes_wanted = asyncio.Event()
         self._exiting = False                 # OBS announced it is closing
         self._stopping = False
         self._ready = False
         self.reports: list[str] = []          # unavailability reports made (codes only)
+        self._controls_init()
 
     # ── lifecycle ──
 
@@ -235,7 +247,10 @@ class ObsProvider(Provider):
             if self._switching or connection.closed:
                 raise IntegrationError(ErrorCode.INSTANCE_UNAVAILABLE,
                                        SWITCHING if self._switching else LOST, retryable=True)
+            await self._load_extras()
+            self._announce()                  # nothing was listed yet: this clears what loading noted
             setup.background.start(self._mute_reader, name="obs-mutes")
+            setup.background.start(self._toast_loop, name="obs-toasts")
             self._publish({s.object_id for s in self._scenes.values()} |
                           {i.object_id for i in self._inputs.values()})
         except (Closed, ProtocolFailure) as error:
@@ -352,6 +367,7 @@ class ObsProvider(Provider):
                 scene.order = -entry["sceneIndex"]      # OBS's highest index is at the top
                 self._catalog_changed(SCENES)
             changed |= self._set_scene(scene, present=True, program=uuid == program)
+        self._sources = {s["sceneUuid"]: s["sceneName"] for s in scenes}
         for entry in inputs:
             if not isinstance(entry, dict):
                 raise ProtocolFailure()
@@ -359,11 +375,14 @@ class ObsProvider(Provider):
             if type(caps) is not int:
                 raise IntegrationError(ErrorCode.INSTANCE_UNAVAILABLE, TOO_OLD)
             audio = bool(caps & OBS_SOURCE_AUDIO) if self._caps else None
+            self._sources[_uuid(entry, "inputUuid")] = _text(entry, "inputName")
             if audio is False:
                 continue
             uuid = _uuid(entry, "inputUuid")
             seen_inputs.add(uuid)
             item = self._input(uuid, _text(entry, "inputName"), audio)
+            kind = entry.get("unversionedInputKind", entry.get("inputKind"))
+            item.kind = kind if isinstance(kind, str) else ""
             item.mute_epoch = None             # every full load needs a current mute observation
             changed |= self._set_input(item, present=True)
         for scene in self._scenes.values():
@@ -446,6 +465,9 @@ class ObsProvider(Provider):
                     continue
                 if any(i.present and i.mute_epoch != epoch for i in self._inputs.values()):
                     raise ProtocolFailure() # incomplete snapshot must never admit actions
+                await self._read_preview()
+                await self._read_transitions()
+                await self._read_names()
                 self._switching = False
                 self._publish({s.object_id for s in self._scenes.values()} |
                               {i.object_id for i in self._inputs.values()})
@@ -465,12 +487,14 @@ class ObsProvider(Provider):
             self._advance_epoch()
             self._collection_changing = True
             self._switching = True
-            self._catalog_changed(SCENES)
-            self._catalog_changed(INPUTS)
+            self._forget_collection()
+            for collection_id in (SCENES, INPUTS, ITEMS, FILTERS, TRANSITIONS, MEDIA, SCENE_COLLECTIONS):
+                self._catalog_changed(collection_id)
         elif event_type == "CurrentSceneCollectionChanged":
             self._advance_epoch()
             self._collection_changing = False
             self._switching = True
+            self._forget_collection()
             if self._ready and not self._stopping:
                 if self._reloading:
                     self._reload_again = True
@@ -501,11 +525,19 @@ class ObsProvider(Provider):
             if _flag(data, "isGroup"):
                 return set()
             scene = self._scene(_uuid(data, "sceneUuid"), _text(data, "sceneName"))
+            self._items_epoch = self._filters_epoch = None
+            self._catalog_changed(ITEMS)
+            self._catalog_changed(FILTERS)
+            if event_type == "SceneCreated":
+                self._sources[scene.uuid] = scene.name
+            else:
+                self._sources.pop(scene.uuid, None)
             if event_type == "SceneCreated":
                 return self._set_scene(scene, present=True, program=scene.program)
             return self._set_scene(scene, present=False, program=False)
         if event_type == "SceneNameChanged":
             uuid = _uuid(data, "sceneUuid")
+            self._source_renamed(uuid, _text(data, "sceneName"))
             if uuid in self._scenes:
                 self._rename(self._scenes[uuid], _text(data, "sceneName"), SCENES)
             return set()
@@ -523,19 +555,30 @@ class ObsProvider(Provider):
             if type(caps) is not int:
                 raise ProtocolFailure()
             audio = bool(caps & OBS_SOURCE_AUDIO) if type(caps) is int else None
+            self._sources[_uuid(data, "inputUuid")] = _text(data, "inputName")
+            self._filters_epoch = None
+            self._catalog_changed(FILTERS)
             if audio is False:
                 return set()
             item = self._input(_uuid(data, "inputUuid"), _text(data, "inputName"), audio)
+            kind = data.get("unversionedInputKind", data.get("inputKind"))
+            item.kind = kind if isinstance(kind, str) else ""
+            self._catalog_changed(MEDIA)
             item.mute_epoch = None
             changed = self._set_input(item, present=True)
             self._mutes_wanted.set()
             return changed
         if event_type == "InputRemoved":
             uuid = _uuid(data, "inputUuid")
+            self._sources.pop(uuid, None)
+            self._filters_epoch = None
+            self._catalog_changed(FILTERS)
+            self._catalog_changed(MEDIA)
             return self._set_input(self._inputs[uuid], present=False) if uuid in self._inputs \
                 else set()
         if event_type == "InputNameChanged":
             uuid = _uuid(data, "inputUuid")
+            self._source_renamed(uuid, _text(data, "inputName"))
             if uuid in self._inputs:
                 self._rename(self._inputs[uuid], _text(data, "inputName"), INPUTS)
             return set()
@@ -550,7 +593,20 @@ class ObsProvider(Provider):
             item.muted = muted
             item.revision += 1
             return {item.object_id}
-        return set()                    # other subscribed events are not used
+        return self._apply_controls(event_type, data)
+
+    def _source_renamed(self, uuid: str, name: str) -> None:
+        """Sources and filters are labelled by name, and filter events match by name."""
+        self._sources[uuid] = name
+        for item in self._items.values():
+            if item.source_uuid == uuid:
+                item.name = name
+        for item in self._filters.values():
+            if item.source_uuid == uuid:
+                item.source_name = name
+        if self._items or self._filters:
+            self._catalog_changed(ITEMS)
+            self._catalog_changed(FILTERS)
 
     def _scene(self, uuid: str, name: str) -> _Scene:
         scene = self._scenes.get(uuid)
@@ -645,16 +701,20 @@ class ObsProvider(Provider):
         """One page of the current listing. Every page of a scan comes from one
         catalog version (the cursor carries it), or the scan must restart."""
         self._check_usable()
+        if collection_id not in (SCENES, INPUTS):
+            await self._prepare_listing(collection_id)
         version = self._catalog[collection_id]
         if collection_id == SCENES:
             objects = [ObjectInfo(s.object_id, SCENES, _label(s.name, "Scene"), None,
-                                  ("switch_scene",))
+                                  ("switch_scene", "set_preview_scene", "save_screenshot"))
                        for s in sorted(self._scenes.values(), key=lambda s: s.order)
                        if s.present]
-        else:
+        elif collection_id == INPUTS:
             objects = [ObjectInfo(i.object_id, INPUTS, _label(i.name, "Input"), None,
-                                  ("set_input_mute",))
+                                  ("set_input_mute", "toggle_input_mute", "set_input_volume", "step_input_volume"))
                        for i in self._inputs.values() if i.present]
+        else:
+            objects = self._listing(collection_id)
         start = 0
         if cursor is not None:
             match = re.fullmatch(r"([0-9]{1,9})\.([0-9]{1,6})", cursor)
@@ -684,13 +744,18 @@ class ObsProvider(Provider):
         if object_id.startswith(SCENE_PREFIX):
             scene = self._scenes.get(object_id[len(SCENE_PREFIX):])
             if scene is not None:
-                return State(object_id, SCENES, scene.revision, {"program": scene.program},
+                return State(object_id, SCENES, scene.revision,
+                             {"program": scene.program, "preview": scene.uuid == self._preview},
                              available=scene.present)
         elif object_id.startswith(INPUT_PREFIX):
             item = self._inputs.get(object_id[len(INPUT_PREFIX):])
             if item is not None and item.muted is not None:
-                return State(object_id, INPUTS, item.revision, {"muted": item.muted},
-                             available=item.present)
+                values = {"muted": item.muted}
+                if item.volume is not None:
+                    values["volume_pct"] = mul_to_percent(item.volume)
+                return State(object_id, INPUTS, item.revision, values, available=item.present)
+        else:
+            return self._control_state(object_id)
         return None
 
     # ── actions ──

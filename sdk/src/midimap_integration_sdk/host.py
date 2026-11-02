@@ -31,16 +31,28 @@ if TYPE_CHECKING:
 class CallContext:
     """The request (or background work) the current task is serving."""
 
-    __slots__ = ("request_id", "deadline", "finished")
+    __slots__ = ("request_id", "deadline", "finished", "suppress_toast")
 
     def __init__(self, request_id: str | None, deadline: float | None):
         self.request_id = request_id          # None for background work
         self.deadline = deadline              # monotonic seconds; None for background
         self.finished = False
+        self.suppress_toast = False
 
 
 current_call: contextvars.ContextVar[CallContext | None] = contextvars.ContextVar(
     "midimap_integration_call", default=None)
+
+
+def toast_suppressed() -> bool:
+    """True inside an action fired by a mapping set to "Suppress toast notification".
+
+    The host already hides that action's feedback. A provider that shows its own
+    toast about what the action caused should check this while handling the action.
+    Toasts about something else, like a dropped connection, should still show.
+    """
+    call = current_call.get()
+    return call is not None and call.suppress_toast
 
 
 @dataclass(frozen=True)

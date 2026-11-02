@@ -17,6 +17,7 @@ from .errors import (
 from .events import EventPublisher
 from .host import (
     AccessToken, Background, HostServices, WebSocket, WebSessionInfo, WebSessionResponse,
+    toast_suppressed,
 )
 from .ui import UI
 from . import ui
@@ -27,7 +28,7 @@ from .stdio import load_manifest, package_manifest, run_worker
 __version__ = "0.1.0"
 
 __all__ = [
-    "UI", "ui", "AccessToken", "Background", "ContextError", "ErrorCode", "EventPublisher", "EventQueueFull",
+    "toast_suppressed", "UI", "ui", "AccessToken", "Background", "ContextError", "ErrorCode", "EventPublisher", "EventQueueFull",
     "ExitCode", "Grants", "HostCallError", "HostCallTimeout", "HostServices",
     "IntegrationError", "NotReadyError", "ObjectInfo", "Page", "Provider", "Setup",
     "State", "TooManyObjects", "WebSocket", "WebSocketClosed", "WebSessionInfo",

@@ -32,6 +32,7 @@ import asyncio
 import contextvars
 import inspect
 import logging
+import traceback
 from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass
@@ -108,6 +109,11 @@ def _error(code: ErrorCode, message: str, *, outcome_unknown: bool = False) -> E
 
 _INVALID_RESULT = "The integration returned an invalid result."
 _TIMED_OUT = object()
+
+
+def _call_name(request: Request) -> str:
+    action_id = request.params.get("action_id") if request.method == "action.invoke" else None
+    return f"action {action_id}" if action_id else request.method
 
 
 class _Handler:
@@ -591,6 +597,8 @@ class WorkerRuntime:
     def _start_handler(self, request: Request, kind: str, coroutine: Coroutine,
                        finish: Callable[[Any], Any]) -> None:
         context = CallContext(request.id, self._scheduler.now() + request.timeout_ms / 1000)
+        if kind == "action":
+            context.suppress_toast = thaw_json(request.params["midi"]).get("suppress_toast") is True
         handler = _Handler(request, kind, context, finish)
         try:
             handler.task = self._spawn(coroutine, context)
@@ -622,7 +630,11 @@ class WorkerRuntime:
         if exception is not None:
             if not isinstance(exception, IntegrationError):
                 self.counters["provider_errors"] += 1
-                log.warning("%s failed with an unexpected error", handler.request.method)
+                # Type and code location only: an exception's text may hold anything.
+                frame = (traceback.extract_tb(exception.__traceback__) or [None])[-1]
+                log.warning("%s failed with an unexpected error: %s at %s:%s", _call_name(handler.request),
+                            type(exception).__name__, frame.filename.rsplit("\\", 1)[-1].rsplit("/", 1)[-1] if frame else "?",
+                            frame.lineno if frame else "?")
             return False, safe_error(exception)
         if handler.cancel_reason == "shutdown":
             # Cleanup already ran; a value produced after that is not trusted.
@@ -649,6 +661,9 @@ class WorkerRuntime:
                 ok, value = False, _error(ErrorCode.PROVIDER_ERROR, _INVALID_RESULT)
             except IntegrationError as error:      # e.g. TooManyObjects
                 ok, value = False, safe_error(error)
+        if not ok:
+            # The host logs the code; this line is the only place the reason appears.
+            log.warning("%s failed: %s (%s)", _call_name(handler.request), value.message, value.code.value)
         if handler.kind == "lifecycle":
             if ok and self._state is WorkerState.INITIALIZING:
                 self._state = WorkerState.READY      # before the reply is queued

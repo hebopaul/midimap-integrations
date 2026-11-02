@@ -699,11 +699,40 @@ def normalize_state(google_device_id: str, trait_map: Mapping[str, Mapping]) -> 
     return DeviceState(google_device_id, values, available=online is True)
 
 
-def parse_get_traits(response: Any) -> dict[str, DeviceState]:
+def _readable_traits(google_device_id: str, traits: Any, problems: list | None) -> dict[str, dict]:
+    """The traits of one device that decode. Google adds value shapes without
+    notice, and one odd value must not hide this device's power state, let alone
+    the other devices in the same answer. A trait reported twice with different
+    values can't be trusted, so it is dropped."""
+    if not isinstance(traits, list):
+        if problems is not None:
+            problems.append((google_device_id, "(all)", "a trait list must be an array"))
+        return {}
+    readable: dict[str, dict] = {}
+    conflicting: set[str] = set()
+    for item in traits:
+        name = item[0] if isinstance(item, list) and item and isinstance(item[0], str) else "(unnamed)"
+        try:
+            decoded = decode_traits([item])
+        except ProtocolError as error:
+            if problems is not None:
+                problems.append((google_device_id, name, str(error)))
+            continue
+        for trait, values in decoded.items():
+            if trait in readable and readable[trait] != values:
+                conflicting.add(trait)
+                if problems is not None:
+                    problems.append((google_device_id, trait, "a device reported a trait twice"))
+            readable.setdefault(trait, values)
+    return {trait: values for trait, values in readable.items() if trait not in conflicting}
+
+
+def parse_get_traits(response: Any, problems: list | None = None) -> dict[str, DeviceState]:
     """`{google_device_id: DeviceState}` from a GetTraits response.
 
     Each record is `[device_ref, traits]`; the device id is the reference's
-    first field. A record without a usable reference is skipped.
+    first field. A record without a usable reference is skipped. What can't be
+    decoded is left out and listed in `problems` as (device, trait, reason).
     """
     records = _at(response, IDX_GET_TRAITS_RECORDS)
     if not isinstance(records, list):
@@ -714,7 +743,7 @@ def parse_get_traits(response: Any) -> dict[str, DeviceState]:
         if not isinstance(ref, list) or not ref or not isinstance(ref[IDX_DEVICE_ID_IN_REF], str):
             continue
         google_device_id = ref[IDX_DEVICE_ID_IN_REF]
-        trait_map = decode_traits(_at(record, IDX_RECORD_TRAITS) or [])
+        trait_map = _readable_traits(google_device_id, _at(record, IDX_RECORD_TRAITS) or [], problems)
         states[google_device_id] = normalize_state(google_device_id, trait_map)
     return states
 
